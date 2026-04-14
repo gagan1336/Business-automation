@@ -1,0 +1,203 @@
+// AutoBiz Pro — Prisma Schema
+// Database: PostgreSQL (hosted on Supabase)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ────────────────────────────────────────────────
+// BUSINESS (one per salon/shop — multi-tenant SaaS)
+// ────────────────────────────────────────────────
+model Business {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique  // e.g. "haircraft-pro" for /book/haircraft-pro
+  ownerName   String
+  phone       String
+  email       String   @unique
+  category    String   @default("Salon & Spa")
+  address     String?
+  website     String?
+  logoUrl     String?
+  plan        String   @default("Free")  // Free | Starter | Pro | Business
+  stripeCustomerId     String?  @unique
+  stripeSubscriptionId String?  @unique
+  firebaseUid String   @unique  // Google OAuth UID from Firebase
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  services      Service[]
+  bookings      Booking[]
+  customers     Customer[]
+  walkins       Walkin[]
+  conversations Conversation[]
+  automations   Automation[]
+  analyticsDaily AnalyticsDaily[]
+
+  @@index([slug])
+  @@index([firebaseUid])
+}
+
+// ────────────────────────────────────────────────
+// SERVICES (treatments/offerings for a business)
+// ────────────────────────────────────────────────
+model Service {
+  id          String   @id @default(cuid())
+  businessId  String
+  name        String
+  category    String
+  durationMin Int      @default(30)
+  price       Float
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([businessId])
+}
+
+// ────────────────────────────────────────────────
+// CUSTOMERS
+// ────────────────────────────────────────────────
+model Customer {
+  id          String    @id @default(cuid())
+  businessId  String
+  name        String
+  phone       String
+  email       String?
+  avatarColor String    @default("#6366f1")
+  totalSpent  Float     @default(0)
+  totalVisits Int       @default(0)
+  lastVisit   DateTime?
+  status      String    @default("active")  // active | inactive
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookings      Booking[]
+  conversations Conversation[]
+
+  @@unique([businessId, phone])
+  @@index([businessId])
+}
+
+// ────────────────────────────────────────────────
+// BOOKINGS
+// ────────────────────────────────────────────────
+model Booking {
+  id         String   @id @default(cuid())
+  businessId String
+  customerId String?
+  serviceId  String?
+  date       String   // "YYYY-MM-DD"
+  time       String   // "HH:MM AM/PM"
+  status     String   @default("pending")  // pending | confirmed | completed | cancelled
+  amount     Float
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id])
+  service  Service?  @relation(fields: [serviceId], references: [id])
+
+  @@index([businessId])
+  @@index([businessId, date])
+  @@index([customerId])
+}
+
+// ────────────────────────────────────────────────
+// WALK-INS
+// ────────────────────────────────────────────────
+model Walkin {
+  id           String   @id @default(cuid())
+  businessId   String
+  customerName String
+  phone        String
+  service      String
+  amount       Float
+  createdAt    DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+}
+
+// ────────────────────────────────────────────────
+// CONVERSATIONS (WhatsApp / Instagram threads)
+// ────────────────────────────────────────────────
+model Conversation {
+  id            String   @id @default(cuid())
+  businessId    String
+  customerId    String?
+  platform      String   // whatsapp | instagram
+  waContactId   String?  // WA phone / IG sender ID
+  customerName  String?  // denormalized for display
+  unreadCount   Int      @default(0)
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id])
+  messages Message[]
+
+  @@unique([businessId, platform, waContactId])
+  @@index([businessId])
+}
+
+// ────────────────────────────────────────────────
+// MESSAGES
+// ────────────────────────────────────────────────
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  text           String
+  fromRole       String       // business | customer
+  sentAt         DateTime     @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+// ────────────────────────────────────────────────
+// AUTOMATIONS
+// ────────────────────────────────────────────────
+model Automation {
+  id         String   @id @default(cuid())
+  businessId String
+  name       String
+  trigger    String
+  action     String
+  active     Boolean  @default(true)
+  runs       Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+}
+
+// ────────────────────────────────────────────────
+// ANALYTICS (daily aggregated — for dashboard chart)
+// ────────────────────────────────────────────────
+model AnalyticsDaily {
+  id           String   @id @default(cuid())
+  businessId   String
+  date         String   // "YYYY-MM-DD"
+  revenue      Float    @default(0)
+  bookingCount Int      @default(0)
+  walkinCount  Int      @default(0)
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, date])
+  @@index([businessId])
+}
