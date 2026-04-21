@@ -1,29 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Zap, Trash2, ChevronRight, X, Play, BarChart2 } from 'lucide-react';
 import Topbar from '../components/Topbar';
-import { mockAutomations } from '../data/mockData';
 import { useToast } from '../context/ToastContext';
+import api from '../api/client';
 
 const triggerOptions = [
-  'Message contains "price"',
-  'Message contains "book"',
-  'Message contains "hours"',
-  'Booking confirmed',
-  'Booking completed',
-  'No reply for 24 hours',
-  'Walk-in entry saved',
-  '2 hours before booking',
-  'Customer not visited in 30 days',
+  'Message contains "price"', 'Message contains "book"', 'Message contains "hours"',
+  'Booking confirmed', 'Booking completed', 'No reply for 24 hours',
+  'Walk-in entry saved', '2 hours before booking', 'Customer not visited in 30 days',
 ];
 
 const actionOptions = [
-  'Send price list + booking link',
-  'Send booking confirmation',
-  'Send appointment reminder',
-  'Send follow-up message',
-  'Send thank you message',
-  'Send review request',
-  'Send promotional offer',
+  'Send price list + booking link', 'Send booking confirmation', 'Send appointment reminder',
+  'Send follow-up message', 'Send thank you message', 'Send review request', 'Send promotional offer',
 ];
 
 function CreateRuleModal({ onClose, onSave }) {
@@ -82,40 +71,68 @@ function CreateRuleModal({ onClose, onSave }) {
 
 export default function Automation() {
   const { toast } = useToast();
-  const [rules, setRules] = useState(mockAutomations);
+  const [rules, setRules] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const toggleRule = (id) => {
-    setRules(rs => rs.map(r => r.id === id ? { ...r, active: !r.active } : r));
-    const rule = rules.find(r => r.id === id);
-    toast(`${rule.name} ${rule.active ? 'disabled' : 'enabled'}`, 'success');
+  useEffect(() => { loadRules(); }, []);
+
+  const loadRules = async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get('/api/automations');
+      setRules(data.automations || []);
+    } catch (err) {
+      console.error('Load automations error:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const deleteRule = (id) => {
+  const toggleRule = async (id) => {
     const rule = rules.find(r => r.id === id);
-    setRules(rs => rs.filter(r => r.id !== id));
-    toast(`"${rule.name}" deleted`, 'info');
+    try {
+      await api.patch(`/api/automations/${id}`, { active: !rule.active });
+      setRules(rs => rs.map(r => r.id === id ? { ...r, active: !r.active } : r));
+      toast(`${rule.name} ${rule.active ? 'disabled' : 'enabled'}`, 'success');
+    } catch (err) {
+      toast(err.message || 'Failed to update', 'error');
+    }
   };
 
-  const handleSave = (form) => {
+  const deleteRule = async (id) => {
+    const rule = rules.find(r => r.id === id);
+    try {
+      await api.delete(`/api/automations/${id}`);
+      setRules(rs => rs.filter(r => r.id !== id));
+      toast(`"${rule.name}" deleted`, 'info');
+    } catch (err) {
+      toast(err.message || 'Failed to delete', 'error');
+    }
+  };
+
+  const handleSave = async (form) => {
     if (!form.name || !form.trigger || !form.action) { toast('Please fill all fields', 'error'); return; }
     const trigger = form.trigger === 'custom' ? form.customTrigger : form.trigger;
     const action = form.action === 'custom' ? form.customAction : form.action;
     if (!trigger || !action) { toast('Please complete trigger and action', 'error'); return; }
-    const newRule = { id: Date.now(), name: form.name, trigger, action, active: true, runs: 0 };
-    setRules(rs => [newRule, ...rs]);
-    toast(`Automation "${form.name}" created!`, 'success');
-    setShowCreate(false);
+    try {
+      const { data } = await api.post('/api/automations', { name: form.name, trigger, action });
+      setRules(rs => [data.automation, ...rs]);
+      toast(`Automation "${form.name}" created!`, 'success');
+      setShowCreate(false);
+    } catch (err) {
+      toast(err.message || 'Failed to create automation', 'error');
+    }
   };
 
   const activeCount = rules.filter(r => r.active).length;
-  const totalRuns = rules.reduce((a, r) => a + r.runs, 0);
+  const totalRuns = rules.reduce((a, r) => a + (r.runs || 0), 0);
 
   return (
     <>
       <Topbar title="Automation" subtitle="Set up triggers and automatic responses" />
       <div className="page-content">
-        {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 28 }}>
           {[
             { label: 'Active Rules', value: activeCount, color: 'var(--color-success)', icon: Zap },
@@ -123,9 +140,7 @@ export default function Automation() {
             { label: 'Total Runs', value: totalRuns, color: 'var(--color-accent)', icon: BarChart2 },
           ].map(s => (
             <div className="stat-card" key={s.label}>
-              <div className="stat-card-icon" style={{ background: s.color + '20' }}>
-                <s.icon size={18} style={{ color: s.color }} />
-              </div>
+              <div className="stat-card-icon" style={{ background: s.color + '20' }}><s.icon size={18} style={{ color: s.color }} /></div>
               <div className="stat-card-value" style={{ color: s.color, fontSize: '1.8rem' }}>{s.value}</div>
               <div className="stat-card-label">{s.label}</div>
             </div>
@@ -137,45 +152,44 @@ export default function Automation() {
             <div className="section-title">Automation Rules</div>
             <p style={{ fontSize: '0.85rem', marginTop: 4 }}>Rules run automatically when conditions are met</p>
           </div>
-          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-            <Plus size={16} /> Create Rule
-          </button>
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> Create Rule</button>
         </div>
 
-        <div className="automation-rules">
-          {rules.map(rule => (
-            <div className="rule-card" key={rule.id} style={{ opacity: rule.active ? 1 : 0.6 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: rule.active ? 'var(--color-success)' : 'var(--text-muted)', flexShrink: 0 }} />
-                  <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{rule.name}</span>
-                  {rule.runs > 0 && (
-                    <span className="badge badge-neutral" style={{ marginLeft: 'auto' }}>{rule.runs} runs</span>
-                  )}
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><div className="spinner" style={{ width: 24, height: 24 }} /></div>
+        ) : (
+          <div className="automation-rules">
+            {rules.map(rule => (
+              <div className="rule-card" key={rule.id} style={{ opacity: rule.active ? 1 : 0.6 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: rule.active ? 'var(--color-success)' : 'var(--text-muted)', flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{rule.name}</span>
+                    {(rule.runs || 0) > 0 && <span className="badge badge-neutral" style={{ marginLeft: 'auto' }}>{rule.runs} runs</span>}
+                  </div>
+                  <div className="rule-flow">
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>WHEN</span>
+                    <span className="rule-trigger">{rule.trigger}</span>
+                    <ChevronRight size={14} className="rule-arrow" />
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>THEN</span>
+                    <span className="rule-action">{rule.action}</span>
+                  </div>
                 </div>
-                <div className="rule-flow">
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>WHEN</span>
-                  <span className="rule-trigger">{rule.trigger}</span>
-                  <ChevronRight size={14} className="rule-arrow" />
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>THEN</span>
-                  <span className="rule-action">{rule.action}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                  <label className="toggle" title={rule.active ? 'Disable' : 'Enable'}>
+                    <input type="checkbox" checked={rule.active} onChange={() => toggleRule(rule.id)} />
+                    <span className="toggle-slider" />
+                  </label>
+                  <button className="btn btn-ghost btn-icon btn-sm" onClick={() => deleteRule(rule.id)} title="Delete rule">
+                    <Trash2 size={15} style={{ color: 'var(--color-danger)' }} />
+                  </button>
                 </div>
               </div>
+            ))}
+          </div>
+        )}
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-                <label className="toggle" title={rule.active ? 'Disable' : 'Enable'}>
-                  <input type="checkbox" checked={rule.active} onChange={() => toggleRule(rule.id)} />
-                  <span className="toggle-slider" />
-                </label>
-                <button className="btn btn-ghost btn-icon btn-sm" onClick={() => deleteRule(rule.id)} title="Delete rule">
-                  <Trash2 size={15} style={{ color: 'var(--color-danger)' }} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {rules.length === 0 && (
+        {!loading && rules.length === 0 && (
           <div className="empty-state">
             <div className="empty-state-icon"><Zap size={28} /></div>
             <div style={{ fontWeight: 600 }}>No automation rules yet</div>
@@ -184,7 +198,7 @@ export default function Automation() {
           </div>
         )}
 
-        {/* Built-in Templates */}
+        {/* Quick Templates */}
         <div style={{ marginTop: 40 }}>
           <div style={{ fontWeight: 700, marginBottom: 12, fontSize: '1rem' }}>Quick Templates</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
@@ -194,22 +208,18 @@ export default function Automation() {
               { trigger: 'Booking confirmed', action: 'Send appointment reminder', label: 'Booking Reminder' },
               { trigger: 'Customer not visited in 30 days', action: 'Send promotional offer', label: 'Win-Back Campaign' },
             ].map(tmpl => (
-              <div key={tmpl.label} className="card" style={{ padding: 16, cursor: 'pointer' }}
-                onClick={() => { setShowCreate(true); }}>
+              <div key={tmpl.label} className="card" style={{ padding: 16, cursor: 'pointer' }} onClick={() => setShowCreate(true)}>
                 <div style={{ fontWeight: 600, marginBottom: 8, fontSize: '0.9rem' }}>{tmpl.label}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <span style={{ fontSize: '0.75rem' }}><span style={{ color: 'var(--color-warning)', fontWeight: 600 }}>When:</span> <span style={{ color: 'var(--text-secondary)' }}>{tmpl.trigger}</span></span>
                   <span style={{ fontSize: '0.75rem' }}><span style={{ color: 'var(--color-success)', fontWeight: 600 }}>Then:</span> <span style={{ color: 'var(--text-secondary)' }}>{tmpl.action}</span></span>
                 </div>
-                <button className="btn btn-ghost btn-sm" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }}>
-                  Use Template
-                </button>
+                <button className="btn btn-ghost btn-sm" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }}>Use Template</button>
               </div>
             ))}
           </div>
         </div>
       </div>
-
       {showCreate && <CreateRuleModal onClose={() => setShowCreate(false)} onSave={handleSave} />}
     </>
   );

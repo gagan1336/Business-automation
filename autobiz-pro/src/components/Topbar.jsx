@@ -26,9 +26,13 @@ export default function Topbar({ title, subtitle }) {
           <Bell size={16} />
           <span className="notif-dot" />
         </div>
-        <div className="user-avatar" style={{ width: 34, height: 34, fontSize: '0.8rem', cursor: 'pointer' }}>
-          {user?.avatar || 'U'}
-        </div>
+        {user?.photoURL ? (
+          <img src={user.photoURL} alt="" style={{ width: 34, height: 34, borderRadius: '50%', cursor: 'pointer' }} />
+        ) : (
+          <div className="user-avatar" style={{ width: 34, height: 34, fontSize: '0.8rem', cursor: 'pointer' }}>
+            {user?.avatar || 'U'}
+          </div>
+        )}
       </div>
     </header>
   );

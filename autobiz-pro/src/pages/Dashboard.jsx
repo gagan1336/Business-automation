@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Calendar, DollarSign, MessageSquare, Users, TrendingUp, TrendingDown,
@@ -6,9 +6,9 @@ import {
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import Topbar from '../components/Topbar';
-import { mockBookings, mockRevenueData } from '../data/mockData';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import api from '../api/client';
 
 const statusColors = {
   confirmed: { color: 'var(--color-success)', bg: 'var(--color-success-glow)' },
@@ -17,8 +17,8 @@ const statusColors = {
   cancelled: { color: 'var(--color-danger)', bg: 'var(--color-danger-glow)' },
 };
 
-function AddBookingModal({ onClose, onSave }) {
-  const [form, setForm] = useState({ customer: '', service: '', time: '', date: '', amount: '' });
+function AddBookingModal({ onClose, onSave, services }) {
+  const [form, setForm] = useState({ customer: '', phone: '', serviceId: '', time: '', date: '', amount: '' });
   const upd = (k, v) => setForm(p => ({ ...p, [k]: v }));
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -28,18 +28,37 @@ function AddBookingModal({ onClose, onSave }) {
           <button className="modal-close" onClick={onClose}><X size={16} /></button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {[
-            { k: 'customer', label: 'Customer Name', type: 'text', ph: 'Priya Mehta' },
-            { k: 'service', label: 'Service', type: 'text', ph: 'Hair Cut & Style' },
-            { k: 'date', label: 'Date', type: 'date' },
-            { k: 'time', label: 'Time', type: 'time' },
-            { k: 'amount', label: 'Amount (₹)', type: 'number', ph: '800' },
-          ].map(({ k, label, type, ph }) => (
-            <div className="form-group" key={k}>
-              <label className="form-label">{label}</label>
-              <input type={type} className="form-input" placeholder={ph} value={form[k]} onChange={e => upd(k, e.target.value)} />
-            </div>
-          ))}
+          <div className="form-group">
+            <label className="form-label">Customer Name</label>
+            <input type="text" className="form-input" placeholder="Priya Mehta" value={form.customer} onChange={e => upd('customer', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Phone</label>
+            <input type="tel" className="form-input" placeholder="+91 98765 43210" value={form.phone} onChange={e => upd('phone', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Service</label>
+            <select className="form-select" value={form.serviceId} onChange={e => {
+              const svc = services.find(s => s.id === e.target.value);
+              upd('serviceId', e.target.value);
+              if (svc) upd('amount', svc.price.toString());
+            }}>
+              <option value="">Select service...</option>
+              {services.map(s => <option key={s.id} value={s.id}>{s.name} — ₹{s.price}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Date</label>
+            <input type="date" className="form-input" value={form.date} onChange={e => upd('date', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Time</label>
+            <input type="time" className="form-input" value={form.time} onChange={e => upd('time', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Amount (₹)</label>
+            <input type="number" className="form-input" placeholder="800" value={form.amount} onChange={e => upd('amount', e.target.value)} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
           <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
@@ -55,22 +74,80 @@ export default function Dashboard() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [showAddBooking, setShowAddBooking] = useState(false);
+  const [todayBookings, setTodayBookings] = useState([]);
+  const [revenueData, setRevenueData] = useState([]);
+  const [stats, setStats] = useState({ todayBookings: 0, revenue: 0, pendingPayments: 0, unreadMessages: 0, revenueTrend: 0 });
+  const [services, setServices] = useState([]);
+  const [automations, setAutomations] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
 
-  const todayBookings = mockBookings.filter(b => b.date === '2026-04-11');
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    setLoadingData(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const [bookingsRes, analyticsRes, todayStatsRes, servicesRes, automationsRes] = await Promise.allSettled([
+        api.get(`/api/bookings?date=${today}`),
+        api.get('/api/analytics?days=7'),
+        api.get('/api/analytics/today'),
+        api.get('/api/services'),
+        api.get('/api/automations'),
+      ]);
+
+      if (bookingsRes.status === 'fulfilled') setTodayBookings(bookingsRes.value.data.bookings || []);
+      if (servicesRes.status === 'fulfilled') setServices(servicesRes.value.data.services || []);
+      if (automationsRes.status === 'fulfilled') setAutomations(automationsRes.value.data.automations || []);
+
+      if (todayStatsRes.status === 'fulfilled') {
+        setStats(todayStatsRes.value.data);
+      }
+
+      if (analyticsRes.status === 'fulfilled') {
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const chartData = (analyticsRes.value.data.analytics || []).map(d => ({
+          day: days[new Date(d.date).getDay()],
+          revenue: d.revenue,
+          bookings: d.bookingCount,
+        }));
+        setRevenueData(chartData.length > 0 ? chartData : [{ day: 'Today', revenue: 0, bookings: 0 }]);
+      }
+    } catch (err) {
+      console.error('Dashboard load error:', err);
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
   const pending = todayBookings.filter(b => b.status === 'pending').length;
   const revenue = todayBookings.filter(b => b.status !== 'cancelled').reduce((a, b) => a + b.amount, 0);
 
-  const stats = [
-    { label: "Today's Bookings", value: todayBookings.length, icon: Calendar, gradient: 'var(--gradient-primary)', trend: '+12%', up: true },
-    { label: 'Revenue Today', value: `₹${revenue.toLocaleString()}`, icon: DollarSign, gradient: 'var(--gradient-success)', trend: '+8%', up: true },
-    { label: 'Pending Payments', value: pending, icon: Clock, gradient: 'var(--gradient-warning)', trend: '-2', up: false },
-    { label: 'Unread Messages', value: 3, icon: MessageSquare, gradient: 'var(--gradient-accent)', trend: 'New', up: true },
+  const dashStats = [
+    { label: "Today's Bookings", value: stats.todayBookings || todayBookings.length, icon: Calendar, gradient: 'var(--gradient-primary)', trend: `${stats.revenueTrend >= 0 ? '+' : ''}${stats.revenueTrend}%`, up: stats.revenueTrend >= 0 },
+    { label: 'Revenue Today', value: `₹${(stats.revenue || revenue).toLocaleString()}`, icon: DollarSign, gradient: 'var(--gradient-success)', trend: `${stats.revenueTrend >= 0 ? '+' : ''}${stats.revenueTrend}%`, up: stats.revenueTrend >= 0 },
+    { label: 'Pending', value: stats.pendingPayments || pending, icon: Clock, gradient: 'var(--gradient-warning)', trend: '', up: false },
+    { label: 'Unread Messages', value: stats.unreadMessages || 0, icon: MessageSquare, gradient: 'var(--gradient-accent)', trend: '', up: true },
   ];
 
-  const handleSaveBooking = (form) => {
-    if (!form.customer || !form.service) { toast('Please fill customer and service', 'error'); return; }
-    toast(`Booking added for ${form.customer}!`, 'success');
-    setShowAddBooking(false);
+  const handleSaveBooking = async (form) => {
+    if (!form.customer || !form.date || !form.time) { toast('Please fill customer, date and time', 'error'); return; }
+    try {
+      await api.post('/api/bookings', {
+        customerName: form.customer,
+        phone: form.phone,
+        serviceId: form.serviceId || undefined,
+        date: form.date,
+        time: form.time,
+        amount: form.amount || 0,
+      });
+      toast(`Booking added for ${form.customer}!`, 'success');
+      setShowAddBooking(false);
+      loadDashboardData();
+    } catch (err) {
+      toast(err.message || 'Failed to create booking', 'error');
+    }
   };
 
   const CustomTooltip = ({ active, payload, label }) => {
@@ -79,23 +156,25 @@ export default function Dashboard() {
         <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', padding: '10px 14px', borderRadius: 8, fontSize: '0.8rem' }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
           <div style={{ color: 'var(--color-primary-light)' }}>₹{payload[0].value.toLocaleString()}</div>
-          <div style={{ color: 'var(--text-muted)' }}>{payload[1]?.value} bookings</div>
+          {payload[1] && <div style={{ color: 'var(--text-muted)' }}>{payload[1].value} bookings</div>}
         </div>
       );
     }
     return null;
   };
 
+  const activeAutomations = automations.filter(a => a.active);
+
   return (
     <>
       <Topbar
-        title={`Good ${new Date().getHours() < 12 ? 'Morning' : 'Afternoon'}, ${user?.name?.split(' ')[0]} 👋`}
-        subtitle={`${user?.businessName} · ${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}`}
+        title={`Good ${new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 17 ? 'Afternoon' : 'Evening'}, ${user?.name?.split(' ')[0] || 'there'} 👋`}
+        subtitle={`${user?.businessName || 'Your Business'} · ${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}`}
       />
       <div className="page-content">
         {/* Stats */}
         <div className="dashboard-stats">
-          {stats.map((s, i) => (
+          {dashStats.map((s, i) => (
             <div className="stat-card" key={i}>
               <div className="stat-card-icon" style={{ background: s.gradient }}>
                 <s.icon size={20} color="#fff" />
@@ -104,11 +183,13 @@ export default function Dashboard() {
                 {s.value}
               </div>
               <div className="stat-card-label">{s.label}</div>
-              <div className="stat-trend">
-                {s.up ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                <span className={s.up ? 'trend-up' : 'trend-down'}>{s.trend}</span>
-                <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>vs yesterday</span>
-              </div>
+              {s.trend && (
+                <div className="stat-trend">
+                  {s.up ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                  <span className={s.up ? 'trend-up' : 'trend-down'}>{s.trend}</span>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>vs yesterday</span>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -138,13 +219,12 @@ export default function Dashboard() {
                 <div>
                   <div className="section-title">Revenue This Week</div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 2 }}>
-                    Total: ₹{mockRevenueData.reduce((a, b) => a + b.revenue, 0).toLocaleString()}
+                    Total: ₹{revenueData.reduce((a, b) => a + (b.revenue || 0), 0).toLocaleString()}
                   </div>
                 </div>
-                <span className="badge badge-success">+18% vs last week</span>
               </div>
               <ResponsiveContainer width="100%" height={200}>
-                <AreaChart data={mockRevenueData}>
+                <AreaChart data={revenueData}>
                   <defs>
                     <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
@@ -182,20 +262,28 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {todayBookings.map(b => {
+                    {todayBookings.length === 0 ? (
+                      <tr><td colSpan={5}>
+                        <div className="empty-state" style={{ padding: 30 }}>
+                          <div style={{ fontWeight: 600 }}>{loadingData ? 'Loading...' : 'No bookings today'}</div>
+                        </div>
+                      </td></tr>
+                    ) : todayBookings.map(b => {
                       const sc = statusColors[b.status] || statusColors.pending;
+                      const name = b.customer?.name || 'Walk-in';
+                      const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
                       return (
                         <tr key={b.id}>
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <div className="avatar" style={{ background: b.avatarColor + '25', color: b.avatarColor }}>{b.avatar}</div>
+                              <div className="avatar" style={{ background: (b.customer?.avatarColor || '#6366f1') + '25', color: b.customer?.avatarColor || '#6366f1' }}>{initials}</div>
                               <div>
-                                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{b.customer}</div>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{b.phone}</div>
+                                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{name}</div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{b.customer?.phone || ''}</div>
                               </div>
                             </div>
                           </td>
-                          <td>{b.service}</td>
+                          <td>{b.service?.name || '-'}</td>
                           <td><span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Clock size={12} style={{ color: 'var(--text-muted)' }} /> {b.time}</span></td>
                           <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>₹{b.amount}</td>
                           <td>
@@ -214,66 +302,23 @@ export default function Dashboard() {
 
           {/* Right Panel */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* Upcoming */}
-            <div className="card">
-              <div className="section-header">
-                <div className="section-title">Upcoming Reminders</div>
-              </div>
-              {[
-                { label: 'Send reminder to Priya Mehta', time: '30 min', color: 'var(--color-primary)' },
-                { label: 'Follow-up with Sneha Patel', time: '2 hours', color: 'var(--color-warning)' },
-                { label: 'Payment pending: Arjun Singh', time: 'Today', color: 'var(--color-danger)' },
-              ].map((r, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: i < 2 ? '1px solid var(--color-border)' : 'none' }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: r.color, flexShrink: 0 }} />
-                  <div style={{ flex: 1, fontSize: '0.85rem' }}>{r.label}</div>
-                  <span className="badge badge-neutral" style={{ fontSize: '0.7rem' }}>{r.time}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Top Services */}
-            <div className="card">
-              <div className="section-header">
-                <div className="section-title">Top Services</div>
-                <span className="badge badge-accent">This week</span>
-              </div>
-              {[
-                { name: 'Haircut & Style', count: 24, pct: 85 },
-                { name: 'Hair Color', count: 18, pct: 65 },
-                { name: 'Beard Trim', count: 15, pct: 55 },
-                { name: 'Facial', count: 10, pct: 35 },
-              ].map((s, i) => (
-                <div key={i} style={{ marginBottom: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.85rem' }}>
-                    <span style={{ fontWeight: 500 }}>{s.name}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>{s.count} bookings</span>
-                  </div>
-                  <div style={{ height: 6, background: 'var(--color-surface-3)', borderRadius: 99, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${s.pct}%`, background: 'var(--gradient-primary)', borderRadius: 99, transition: 'width 0.5s ease' }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-
             {/* Automation Status */}
             <div className="card">
               <div className="section-header">
                 <div className="section-title">Automation</div>
-                <span className="badge badge-success">4 Active</span>
+                <span className="badge badge-success">{activeAutomations.length} Active</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {[
-                  { name: 'Price Enquiry Reply', runs: 48, active: true },
-                  { name: 'Booking Confirmation', runs: 124, active: true },
-                  { name: '24h Follow-up', runs: 32, active: true },
-                ].map((a, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < 2 ? '1px solid var(--color-border)' : 'none' }}>
+                {activeAutomations.slice(0, 3).map((a, i) => (
+                  <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < Math.min(activeAutomations.length, 3) - 1 ? '1px solid var(--color-border)' : 'none' }}>
                     <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-success)' }} />
                     <span style={{ flex: 1, fontSize: '0.85rem' }}>{a.name}</span>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{a.runs} runs</span>
                   </div>
                 ))}
+                {activeAutomations.length === 0 && (
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', padding: '12px 0' }}>No active automations</div>
+                )}
               </div>
               <button className="btn btn-ghost btn-sm w-full" style={{ marginTop: 14, justifyContent: 'center' }} onClick={() => navigate('/app/automation')}>
                 Manage Automations
@@ -283,7 +328,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {showAddBooking && <AddBookingModal onClose={() => setShowAddBooking(false)} onSave={handleSaveBooking} />}
+      {showAddBooking && <AddBookingModal onClose={() => setShowAddBooking(false)} onSave={handleSaveBooking} services={services} />}
     </>
   );
 }

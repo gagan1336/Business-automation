@@ -37,6 +37,7 @@ model Business {
   walkins       Walkin[]
   conversations Conversation[]
   automations   Automation[]
+  channels      Channel[]
   analyticsDaily AnalyticsDaily[]
 
   @@index([slug])
@@ -199,5 +200,32 @@ model AnalyticsDaily {
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@unique([businessId, date])
+  @@index([businessId])
+}
+
+// ────────────────────────────────────────────────
+// CHANNELS (WhatsApp / Instagram connections)
+// ────────────────────────────────────────────────
+model Channel {
+  id            String   @id @default(cuid())
+  businessId    String
+  platform      String   // "whatsapp" | "instagram"
+  active        Boolean  @default(true)
+  // WhatsApp fields
+  phoneNumberId String?  // META_PHONE_NUMBER_ID
+  accessToken   String?  // META_ACCESS_TOKEN
+  verifyToken   String?  // Webhook verify token
+  waPhoneNumber String?  // Display phone number
+  // Instagram fields
+  igUserId      String?
+  igAccessToken String?
+  appSecret     String?
+  igUsername    String?  // Display username
+  connectedAt   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, platform])
   @@index([businessId])
 }

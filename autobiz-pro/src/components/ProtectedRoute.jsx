@@ -13,5 +13,10 @@ export default function ProtectedRoute({ children }) {
     );
   }
 
-  return user ? children : <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+
+  // If user signed in via Google but hasn't registered their business yet
+  if (user.needsRegistration) return <Navigate to="/register" replace />;
+
+  return children;
 }

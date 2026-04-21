@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { Plus, Search, Calendar, Clock, Filter, X, ChevronDown } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Search, Calendar, Clock, X } from 'lucide-react';
 import Topbar from '../components/Topbar';
-import { mockBookings, mockServices } from '../data/mockData';
 import { useToast } from '../context/ToastContext';
+import api from '../api/client';
 
 const statusColors = {
   confirmed: { color: 'var(--color-success)', bg: 'var(--color-success-glow)', label: 'Confirmed' },
@@ -13,7 +13,9 @@ const statusColors = {
 
 function BookingModal({ booking, onClose, onStatusChange }) {
   if (!booking) return null;
-  const sc = statusColors[booking.status];
+  const sc = statusColors[booking.status] || statusColors.pending;
+  const name = booking.customer?.name || 'Walk-in';
+  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal">
@@ -22,16 +24,16 @@ function BookingModal({ booking, onClose, onStatusChange }) {
           <button className="modal-close" onClick={onClose}><X size={16} /></button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 0', borderBottom: '1px solid var(--color-border)', marginBottom: 20 }}>
-          <div className="avatar" style={{ width: 52, height: 52, fontSize: '1.1rem', background: booking.avatarColor + '25', color: booking.avatarColor }}>{booking.avatar}</div>
+          <div className="avatar" style={{ width: 52, height: 52, fontSize: '1.1rem', background: (booking.customer?.avatarColor || '#6366f1') + '25', color: booking.customer?.avatarColor || '#6366f1' }}>{initials}</div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: '1rem' }}>{booking.customer}</div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{booking.phone}</div>
+            <div style={{ fontWeight: 700, fontSize: '1rem' }}>{name}</div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{booking.customer?.phone || ''}</div>
           </div>
           <span className="badge" style={{ background: sc.bg, color: sc.color, marginLeft: 'auto' }}>{sc.label}</span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
           {[
-            { label: 'Service', value: booking.service },
+            { label: 'Service', value: booking.service?.name || '-' },
             { label: 'Amount', value: `₹${booking.amount}` },
             { label: 'Date', value: booking.date },
             { label: 'Time', value: booking.time },
@@ -56,8 +58,8 @@ function BookingModal({ booking, onClose, onStatusChange }) {
   );
 }
 
-function AddBookingModal({ onClose, onSave }) {
-  const [form, setForm] = useState({ customer: '', phone: '', service: '', date: '', time: '', amount: '' });
+function AddBookingModal({ onClose, onSave, services }) {
+  const [form, setForm] = useState({ customer: '', phone: '', serviceId: '', date: '', time: '', amount: '' });
   const upd = (k, v) => setForm(p => ({ ...p, [k]: v }));
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -79,13 +81,13 @@ function AddBookingModal({ onClose, onSave }) {
           </div>
           <div className="form-group">
             <label className="form-label">Service</label>
-            <select className="form-select" value={form.service} onChange={e => {
-              const svc = mockServices.find(s => s.name === e.target.value);
-              upd('service', e.target.value);
+            <select className="form-select" value={form.serviceId} onChange={e => {
+              const svc = services.find(s => s.id === e.target.value);
+              upd('serviceId', e.target.value);
               if (svc) upd('amount', svc.price.toString());
             }}>
               <option value="">Select service...</option>
-              {mockServices.map(s => <option key={s.id} value={s.name}>{s.name} — ₹{s.price}</option>)}
+              {services.map(s => <option key={s.id} value={s.id}>{s.name} — ₹{s.price}</option>)}
             </select>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -114,14 +116,37 @@ function AddBookingModal({ onClose, onSave }) {
 
 export default function Bookings() {
   const { toast } = useToast();
-  const [bookings, setBookings] = useState(mockBookings);
+  const [bookings, setBookings] = useState([]);
+  const [services, setServices] = useState([]);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
+  const [loading, setLoading] = useState(true);
+  const [total, setTotal] = useState(0);
 
-  const today = '2026-04-11';
+  const today = new Date().toISOString().split('T')[0];
+
+  useEffect(() => { loadData(); }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [bRes, sRes] = await Promise.all([
+        api.get('/api/bookings?limit=100'),
+        api.get('/api/services'),
+      ]);
+      setBookings(bRes.data.bookings || []);
+      setTotal(bRes.data.total || 0);
+      setServices(sRes.data.services || []);
+    } catch (err) {
+      toast('Failed to load bookings', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const tabs = [
     { key: 'all', label: 'All Bookings' },
     { key: 'today', label: "Today" },
@@ -129,28 +154,42 @@ export default function Bookings() {
   ];
 
   const filtered = bookings.filter(b => {
-    const matchSearch = b.customer.toLowerCase().includes(search.toLowerCase()) || b.service.toLowerCase().includes(search.toLowerCase());
+    const name = b.customer?.name || '';
+    const svc = b.service?.name || '';
+    const matchSearch = name.toLowerCase().includes(search.toLowerCase()) || svc.toLowerCase().includes(search.toLowerCase());
     const matchStatus = filterStatus === 'all' || b.status === filterStatus;
     const matchTab = activeTab === 'all' ? true : activeTab === 'today' ? b.date === today : b.date > today;
     return matchSearch && matchStatus && matchTab;
   });
 
-  const handleStatusChange = (id, status) => {
-    setBookings(bks => bks.map(b => b.id === id ? { ...b, status } : b));
-    toast(`Booking marked as ${statusColors[status].label}`, 'success');
-    setSelectedBooking(null);
+  const handleStatusChange = async (id, status) => {
+    try {
+      await api.patch(`/api/bookings/${id}`, { status });
+      setBookings(bks => bks.map(b => b.id === id ? { ...b, status } : b));
+      toast(`Booking marked as ${statusColors[status].label}`, 'success');
+      setSelectedBooking(null);
+    } catch (err) {
+      toast(err.message || 'Failed to update booking', 'error');
+    }
   };
 
-  const handleSave = (form) => {
-    if (!form.customer || !form.service) { toast('Please fill required fields', 'error'); return; }
-    const newB = {
-      id: Date.now(), customer: form.customer, phone: form.phone, service: form.service,
-      date: form.date || today, time: form.time || '12:00 PM', amount: parseInt(form.amount) || 0,
-      status: 'confirmed', avatar: form.customer.slice(0, 2).toUpperCase(), avatarColor: '#6366f1',
-    };
-    setBookings(bks => [newB, ...bks]);
-    toast(`Booking added for ${form.customer}!`, 'success');
-    setShowAdd(false);
+  const handleSave = async (form) => {
+    if (!form.customer || !form.date || !form.time) { toast('Please fill required fields', 'error'); return; }
+    try {
+      await api.post('/api/bookings', {
+        customerName: form.customer,
+        phone: form.phone,
+        serviceId: form.serviceId || undefined,
+        date: form.date,
+        time: form.time,
+        amount: form.amount || 0,
+      });
+      toast(`Booking added for ${form.customer}!`, 'success');
+      setShowAdd(false);
+      loadData();
+    } catch (err) {
+      toast(err.message || 'Failed to create booking', 'error');
+    }
   };
 
   return (
@@ -188,17 +227,13 @@ export default function Bookings() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Customer</th>
-                  <th>Service</th>
-                  <th>Date</th>
-                  <th>Time</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: 'right' }}>Action</th>
+                  <th>Customer</th><th>Service</th><th>Date</th><th>Time</th><th>Amount</th><th>Status</th><th style={{ textAlign: 'right' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 ? (
+                {loading ? (
+                  <tr><td colSpan={7}><div className="empty-state"><div className="spinner" style={{ width: 24, height: 24 }} /></div></td></tr>
+                ) : filtered.length === 0 ? (
                   <tr><td colSpan={7}>
                     <div className="empty-state">
                       <div className="empty-state-icon"><Calendar size={28} /></div>
@@ -207,33 +242,25 @@ export default function Bookings() {
                     </div>
                   </td></tr>
                 ) : filtered.map(b => {
-                  const sc = statusColors[b.status];
+                  const sc = statusColors[b.status] || statusColors.pending;
+                  const name = b.customer?.name || 'Walk-in';
+                  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
                   return (
                     <tr key={b.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedBooking(b)}>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <div className="avatar" style={{ background: b.avatarColor + '25', color: b.avatarColor }}>{b.avatar}</div>
+                          <div className="avatar" style={{ background: (b.customer?.avatarColor || '#6366f1') + '25', color: b.customer?.avatarColor || '#6366f1' }}>{initials}</div>
                           <div>
-                            <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{b.customer}</div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{b.phone}</div>
+                            <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{name}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{b.customer?.phone || ''}</div>
                           </div>
                         </div>
                       </td>
-                      <td style={{ fontSize: '0.875rem' }}>{b.service}</td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem' }}>
-                          <Calendar size={12} style={{ color: 'var(--text-muted)' }} /> {b.date}
-                        </div>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem' }}>
-                          <Clock size={12} style={{ color: 'var(--text-muted)' }} /> {b.time}
-                        </div>
-                      </td>
+                      <td style={{ fontSize: '0.875rem' }}>{b.service?.name || '-'}</td>
+                      <td><div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem' }}><Calendar size={12} style={{ color: 'var(--text-muted)' }} /> {b.date}</div></td>
+                      <td><div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem' }}><Clock size={12} style={{ color: 'var(--text-muted)' }} /> {b.time}</div></td>
                       <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>₹{b.amount}</td>
-                      <td>
-                        <span className="badge" style={{ background: sc.bg, color: sc.color, textTransform: 'capitalize' }}>{b.status}</span>
-                      </td>
+                      <td><span className="badge" style={{ background: sc.bg, color: sc.color, textTransform: 'capitalize' }}>{b.status}</span></td>
                       <td style={{ textAlign: 'right' }}>
                         <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setSelectedBooking(b); }}>Details</button>
                       </td>
@@ -244,14 +271,13 @@ export default function Bookings() {
             </table>
           </div>
         </div>
-
         <div style={{ marginTop: 12, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-          Showing {filtered.length} of {bookings.length} bookings
+          Showing {filtered.length} of {total} bookings
         </div>
       </div>
 
       {selectedBooking && <BookingModal booking={selectedBooking} onClose={() => setSelectedBooking(null)} onStatusChange={handleStatusChange} />}
-      {showAdd && <AddBookingModal onClose={() => setShowAdd(false)} onSave={handleSave} />}
+      {showAdd && <AddBookingModal onClose={() => setShowAdd(false)} onSave={handleSave} services={services} />}
     </>
   );
 }

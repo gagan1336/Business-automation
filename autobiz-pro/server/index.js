@@ -16,8 +16,9 @@ app.use(cors({
   credentials: true,
 }));
 
-// Raw body for Stripe + Meta webhooks (before JSON parse)
+// Raw body for Stripe + Meta webhooks (MUST be before JSON parse)
 app.use('/api/webhooks', express.raw({ type: 'application/json' }));
+app.use('/api/billing/webhook', express.raw({ type: 'application/json' }));
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -41,6 +42,7 @@ app.use('/api/customers',   require('./routes/customers'));
 app.use('/api/walkins',     require('./routes/walkins'));
 app.use('/api/services',    require('./routes/services'));
 app.use('/api/conversations', require('./routes/inbox'));
+app.use('/api/channels',    require('./routes/channels'));
 app.use('/api/automations', require('./routes/automation'));
 app.use('/api/analytics',   require('./routes/analytics'));
 app.use('/api/webhooks',    require('./routes/webhooks'));
@@ -60,6 +62,18 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚀 AutoBiz Pro server running on port ${PORT}`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+
+  // Start BullMQ automation worker if Redis is configured
+  if (process.env.REDIS_URL) {
+    try {
+      require('./queues/automationWorker');
+      console.log('   BullMQ worker: started ✅');
+    } catch (err) {
+      console.error('   BullMQ worker failed to start:', err.message);
+    }
+  } else {
+    console.log('   BullMQ worker: skipped (no REDIS_URL)');
+  }
 });
 
 module.exports = app;

@@ -1,46 +1,65 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { UserPlus, Clock, Phone, Scissors, DollarSign, Check, X } from 'lucide-react';
 import Topbar from '../components/Topbar';
-import { mockWalkins, mockServices } from '../data/mockData';
 import { useToast } from '../context/ToastContext';
+import api from '../api/client';
 
 export default function Walkins() {
   const { toast } = useToast();
-  const [walkins, setWalkins] = useState(mockWalkins);
+  const [walkins, setWalkins] = useState([]);
+  const [services, setServices] = useState([]);
   const [form, setForm] = useState({ name: '', phone: '', service: '', amount: '', notes: '' });
   const [loading, setLoading] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
   const upd = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
+  useEffect(() => { loadData(); }, []);
+
+  const loadData = async () => {
+    setLoadingData(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const [wRes, sRes] = await Promise.all([
+        api.get(`/api/walkins?date=${today}`),
+        api.get('/api/services'),
+      ]);
+      setWalkins(wRes.data.walkins || []);
+      setServices(sRes.data.services || []);
+    } catch (err) {
+      console.error('Load walkins error:', err);
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
   const handleServiceChange = (svcName) => {
-    const svc = mockServices.find(s => s.name === svcName);
+    const svc = services.find(s => s.name === svcName);
     upd('service', svcName);
     if (svc) upd('amount', svc.price.toString());
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.name || !form.phone || !form.service) { toast('Please fill Name, Phone and Service', 'error'); return; }
     setLoading(true);
-    setTimeout(() => {
-      const newWalkin = {
-        id: Date.now(),
-        name: form.name,
+    try {
+      await api.post('/api/walkins', {
+        customerName: form.name,
         phone: form.phone,
         service: form.service,
         amount: parseInt(form.amount) || 0,
-        time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-        date: '2026-04-11',
-      };
-      setWalkins(ws => [newWalkin, ...ws]);
+      });
+      toast(`Walk-in saved! Thank-you message sent to ${form.name} 📱`, 'success');
       setForm({ name: '', phone: '', service: '', amount: '', notes: '' });
-      toast(`Walk-in saved! Thank-you SMS sent to ${form.name} 📱`, 'success');
+      loadData();
+    } catch (err) {
+      toast(err.message || 'Failed to save walk-in', 'error');
+    } finally {
       setLoading(false);
-    }, 700);
+    }
   };
 
-  const today = '2026-04-11';
-  const todayWalkins = walkins.filter(w => w.date === today);
-  const totalRevenue = todayWalkins.reduce((a, w) => a + w.amount, 0);
+  const totalRevenue = walkins.reduce((a, w) => a + w.amount, 0);
 
   return (
     <>
@@ -83,7 +102,7 @@ export default function Walkins() {
                     <Scissors size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', zIndex: 1 }} />
                     <select className="form-select" style={{ paddingLeft: 36 }} value={form.service} onChange={e => handleServiceChange(e.target.value)} required>
                       <option value="">Select service...</option>
-                      {mockServices.map(s => <option key={s.id} value={s.name}>{s.name} — ₹{s.price} ({s.duration} min)</option>)}
+                      {services.map(s => <option key={s.id} value={s.name}>{s.name} — ₹{s.price} ({s.durationMin} min)</option>)}
                     </select>
                   </div>
                 </div>
@@ -94,11 +113,6 @@ export default function Walkins() {
                     <DollarSign size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input type="number" className="form-input" style={{ paddingLeft: 36 }} placeholder="0" value={form.amount} onChange={e => upd('amount', e.target.value)} />
                   </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Notes (optional)</label>
-                  <textarea className="form-textarea" placeholder="Any special requirements..." value={form.notes} onChange={e => upd('notes', e.target.value)} style={{ minHeight: 70 }} />
                 </div>
 
                 <div style={{ background: 'var(--color-success-glow)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 'var(--radius-md)', padding: 12, fontSize: '0.8rem', color: 'var(--color-success)' }}>
@@ -117,7 +131,7 @@ export default function Walkins() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <div className="stat-card">
                 <div className="stat-card-icon" style={{ background: 'var(--gradient-primary)' }}><UserPlus size={18} color="#fff" /></div>
-                <div className="stat-card-value" style={{ background: 'var(--gradient-primary)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{todayWalkins.length}</div>
+                <div className="stat-card-value" style={{ background: 'var(--gradient-primary)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{walkins.length}</div>
                 <div className="stat-card-label">Walk-ins Today</div>
               </div>
               <div className="stat-card">
@@ -131,7 +145,9 @@ export default function Walkins() {
               <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border)' }}>
                 <div style={{ fontWeight: 700 }}>Today's Walk-ins</div>
               </div>
-              {todayWalkins.length === 0 ? (
+              {loadingData ? (
+                <div className="empty-state" style={{ padding: 40 }}><div className="spinner" style={{ width: 24, height: 24 }} /></div>
+              ) : walkins.length === 0 ? (
                 <div className="empty-state" style={{ padding: 40 }}>
                   <div className="empty-state-icon"><UserPlus size={24} /></div>
                   <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>No walk-ins today</div>
@@ -139,29 +155,18 @@ export default function Walkins() {
               ) : (
                 <div className="table-wrapper" style={{ border: 'none', borderRadius: 0 }}>
                   <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Customer</th>
-                        <th>Service</th>
-                        <th>Time</th>
-                        <th>Amount</th>
-                      </tr>
-                    </thead>
+                    <thead><tr><th>Customer</th><th>Service</th><th>Time</th><th>Amount</th></tr></thead>
                     <tbody>
-                      {todayWalkins.map(w => (
+                      {walkins.map(w => (
                         <tr key={w.id}>
                           <td>
                             <div>
-                              <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{w.name}</div>
+                              <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{w.customerName}</div>
                               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{w.phone}</div>
                             </div>
                           </td>
                           <td style={{ fontSize: '0.875rem' }}>{w.service}</td>
-                          <td>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem' }}>
-                              <Clock size={12} style={{ color: 'var(--text-muted)' }} /> {w.time}
-                            </span>
-                          </td>
+                          <td><span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem' }}><Clock size={12} style={{ color: 'var(--text-muted)' }} /> {new Date(w.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span></td>
                           <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>₹{w.amount}</td>
                         </tr>
                       ))}

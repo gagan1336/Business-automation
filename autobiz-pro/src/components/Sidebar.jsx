@@ -7,8 +7,8 @@ import {
 
 const navItems = [
   { label: 'Dashboard', icon: LayoutDashboard, path: '/app/dashboard' },
-  { label: 'Bookings', icon: Calendar, path: '/app/bookings', badge: null },
-  { label: 'Inbox', icon: MessageSquare, path: '/app/inbox', badge: 3 },
+  { label: 'Bookings', icon: Calendar, path: '/app/bookings' },
+  { label: 'Inbox', icon: MessageSquare, path: '/app/inbox' },
   { label: 'Automation', icon: Zap, path: '/app/automation' },
   { label: 'Walk-ins', icon: UserPlus, path: '/app/walkins' },
   { label: 'Customers', icon: Users, path: '/app/customers' },
@@ -18,8 +18,8 @@ export default function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/');
   };
 
@@ -42,7 +42,6 @@ export default function Sidebar() {
           >
             <item.icon size={18} />
             <span>{item.label}</span>
-            {item.badge && <span className="nav-badge">{item.badge}</span>}
           </NavLink>
         ))}
 
@@ -55,7 +54,11 @@ export default function Sidebar() {
 
       <div className="sidebar-footer">
         <div className="sidebar-user" onClick={handleLogout} title="Logout">
-          <div className="user-avatar">{user?.avatar || 'U'}</div>
+          {user?.photoURL ? (
+            <img src={user.photoURL} alt="" style={{ width: 34, height: 34, borderRadius: '50%', flexShrink: 0 }} />
+          ) : (
+            <div className="user-avatar">{user?.avatar || 'U'}</div>
+          )}
           <div className="user-info">
             <div className="user-name">{user?.name || 'User'}</div>
             <div className="user-plan">✦ {user?.plan || 'Free'} Plan</div>
