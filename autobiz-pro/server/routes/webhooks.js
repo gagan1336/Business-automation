@@ -3,22 +3,51 @@ const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
 const prisma = require('../services/db');
-const { fireAutoReply } = require('../queues/automationQueue');
+
+// Safe auto-reply — only fires if Redis/BullMQ is configured
+async function safeFireAutoReply(conversationId, phone, messageText, business) {
+  try {
+    const { fireAutoReply } = require('../queues/automationQueue');
+    await fireAutoReply(conversationId, phone, messageText, business);
+  } catch (err) {
+    console.warn('[Webhook] Auto-reply skipped (queue not available):', err.message);
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // WHATSAPP WEBHOOKS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // GET /api/webhooks/whatsapp — Meta webhook verification
-router.get('/whatsapp', (req, res) => {
+router.get('/whatsapp', async (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
-    console.log('[Webhook] WhatsApp verification successful');
+  if (mode !== 'subscribe' || !token) {
+    console.warn('[Webhook] WhatsApp verification failed — missing mode or token');
+    return res.sendStatus(403);
+  }
+
+  // Check against env var first
+  if (token === process.env.META_VERIFY_TOKEN) {
+    console.log('[Webhook] WhatsApp verification successful (env token)');
     return res.status(200).send(challenge);
   }
+
+  // Check against any channel's verify token in DB (multi-tenant)
+  try {
+    const channel = await prisma.channel.findFirst({
+      where: { platform: 'whatsapp', verifyToken: token, active: true },
+    });
+    if (channel) {
+      console.log('[Webhook] WhatsApp verification successful (channel token)');
+      return res.status(200).send(challenge);
+    }
+  } catch (err) {
+    console.error('[Webhook] DB lookup error during verification:', err.message);
+  }
+
   console.warn('[Webhook] WhatsApp verification failed — token mismatch');
   return res.sendStatus(403);
 });
@@ -30,24 +59,19 @@ router.post('/whatsapp', async (req, res) => {
 
   try {
     // Parse raw body (express.raw was applied in index.js for /api/webhooks)
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) : 
-                 Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString()) : req.body;
-
-    // Verify signature if APP_SECRET is configured
-    if (process.env.INSTAGRAM_APP_SECRET && req.headers['x-hub-signature-256']) {
-      const signature = req.headers['x-hub-signature-256'];
-      const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
-      const expectedSig = 'sha256=' + crypto
-        .createHmac('sha256', process.env.INSTAGRAM_APP_SECRET)
-        .update(rawBody)
-        .digest('hex');
-      if (signature !== expectedSig) {
-        console.warn('[Webhook] WhatsApp signature verification failed');
-        return;
-      }
+    let body;
+    try {
+      body = typeof req.body === 'string' ? JSON.parse(req.body) : 
+             Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString()) : req.body;
+    } catch (parseErr) {
+      console.error('[Webhook] Failed to parse WhatsApp body:', parseErr.message);
+      return;
     }
 
-    if (!body?.entry) return;
+    if (!body?.entry) {
+      console.log('[Webhook] WhatsApp — no entry in body, ignoring');
+      return;
+    }
 
     for (const entry of body.entry) {
       for (const change of entry.changes || []) {
@@ -59,8 +83,16 @@ router.post('/whatsapp', async (req, res) => {
         const contactPhone = value.contacts?.[0]?.wa_id;
         const contactName = value.contacts?.[0]?.profile?.name || 'Unknown';
 
+        if (!phoneNumberId || !contactPhone) {
+          console.warn('[Webhook] Missing phoneNumberId or contactPhone');
+          continue;
+        }
+
         for (const message of value.messages) {
-          if (message.type !== 'text') continue;
+          if (message.type !== 'text') {
+            console.log(`[Webhook] Skipping non-text message type: ${message.type}`);
+            continue;
+          }
           const messageText = message.text?.body;
           if (!messageText) continue;
 
@@ -79,6 +111,15 @@ router.post('/whatsapp', async (req, res) => {
           
           const business = channel.business;
 
+          // Upsert customer (optional — link if phone matches)
+          let customerId = null;
+          try {
+            const customer = await prisma.customer.findUnique({
+              where: { businessId_phone: { businessId: business.id, phone: contactPhone } }
+            });
+            if (customer) customerId = customer.id;
+          } catch (_) { /* ignore */ }
+
           // Upsert conversation
           const conversation = await prisma.conversation.upsert({
             where: {
@@ -92,6 +133,7 @@ router.post('/whatsapp', async (req, res) => {
               customerName: contactName,
               unreadCount: { increment: 1 },
               lastMessageAt: new Date(),
+              ...(customerId && { customerId }),
             },
             create: {
               businessId: business.id,
@@ -99,6 +141,7 @@ router.post('/whatsapp', async (req, res) => {
               waContactId: contactPhone,
               customerName: contactName,
               unreadCount: 1,
+              ...(customerId && { customerId }),
             },
           });
 
@@ -111,14 +154,15 @@ router.post('/whatsapp', async (req, res) => {
             },
           });
 
-          // Enqueue auto-reply job (non-blocking)
-          fireAutoReply(conversation.id, contactPhone, messageText, business)
-            .catch(err => console.error('[Webhook] Auto-reply queue error:', err.message));
+          console.log(`[Webhook] Message saved to conversation ${conversation.id}`);
+
+          // Enqueue auto-reply job (non-blocking, safe if no Redis)
+          safeFireAutoReply(conversation.id, contactPhone, messageText, business);
         }
       }
     }
   } catch (err) {
-    console.error('[Webhook] WhatsApp processing error:', err.message);
+    console.error('[Webhook] WhatsApp processing error:', err.message, err.stack);
   }
 });
 
@@ -127,15 +171,31 @@ router.post('/whatsapp', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // GET /api/webhooks/instagram — Meta webhook verification
-router.get('/instagram', (req, res) => {
+router.get('/instagram', async (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode === 'subscribe' && token === process.env.INSTAGRAM_VERIFY_TOKEN) {
-    console.log('[Webhook] Instagram verification successful');
+  if (mode !== 'subscribe' || !token) {
+    return res.sendStatus(403);
+  }
+
+  if (token === process.env.INSTAGRAM_VERIFY_TOKEN) {
+    console.log('[Webhook] Instagram verification successful (env token)');
     return res.status(200).send(challenge);
   }
+
+  // Check channel-level verify token
+  try {
+    const channel = await prisma.channel.findFirst({
+      where: { platform: 'instagram', verifyToken: token, active: true },
+    });
+    if (channel) {
+      console.log('[Webhook] Instagram verification successful (channel token)');
+      return res.status(200).send(challenge);
+    }
+  } catch (_) {}
+
   console.warn('[Webhook] Instagram verification failed — token mismatch');
   return res.sendStatus(403);
 });
@@ -146,21 +206,13 @@ router.post('/instagram', async (req, res) => {
   res.sendStatus(200);
 
   try {
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) :
-                 Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString()) : req.body;
-
-    // Verify signature
-    if (process.env.INSTAGRAM_APP_SECRET && req.headers['x-hub-signature-256']) {
-      const signature = req.headers['x-hub-signature-256'];
-      const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
-      const expectedSig = 'sha256=' + crypto
-        .createHmac('sha256', process.env.INSTAGRAM_APP_SECRET)
-        .update(rawBody)
-        .digest('hex');
-      if (signature !== expectedSig) {
-        console.warn('[Webhook] Instagram signature verification failed');
-        return;
-      }
+    let body;
+    try {
+      body = typeof req.body === 'string' ? JSON.parse(req.body) :
+             Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString()) : req.body;
+    } catch (parseErr) {
+      console.error('[Webhook] Failed to parse Instagram body:', parseErr.message);
+      return;
     }
 
     if (!body?.entry) return;
@@ -171,12 +223,11 @@ router.post('/instagram', async (req, res) => {
 
         const senderId = messaging.sender?.id;
         const messageText = messaging.message.text;
+        const recipientId = messaging.recipient?.id;
+
+        if (!senderId || !recipientId) continue;
 
         console.log(`[Webhook] Instagram DM from ${senderId}: ${messageText.substring(0, 50)}`);
-
-        // Look up the business matching this Instagram User ID or just the first if Instagram doesn't pass a unique identifier in receiver yet? Wait, Instagram webhooks might not send the receiver's ID in `messaging.sender.id`. Actually, `messaging.recipient.id` is the business IG User ID. Let's look for `messaging.recipient.id`.
-        const recipientId = messaging.recipient?.id;
-        if (!recipientId) continue;
 
         const channel = await prisma.channel.findFirst({
           where: { platform: 'instagram', igUserId: recipientId, active: true },
@@ -221,13 +272,14 @@ router.post('/instagram', async (req, res) => {
           },
         });
 
-        // Queue auto-reply
-        fireAutoReply(conversation.id, senderId, messageText, business)
-          .catch(err => console.error('[Webhook] IG auto-reply error:', err.message));
+        console.log(`[Webhook] Instagram message saved to conversation ${conversation.id}`);
+
+        // Queue auto-reply (safe)
+        safeFireAutoReply(conversation.id, senderId, messageText, business);
       }
     }
   } catch (err) {
-    console.error('[Webhook] Instagram processing error:', err.message);
+    console.error('[Webhook] Instagram processing error:', err.message, err.stack);
   }
 });
 

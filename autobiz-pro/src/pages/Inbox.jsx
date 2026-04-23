@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Send, Link2, MessageCircle, Search, MoreVertical, Trash2 } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Send, Link2, MessageCircle, Search, Plus, Trash2, Phone, X } from 'lucide-react';
 import Topbar from '../components/Topbar';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
@@ -41,39 +41,48 @@ export default function Inbox() {
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [editingChannel, setEditingChannel] = useState(null);
 
+  // New chat modal state
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [newChatPhone, setNewChatPhone] = useState('');
+  const [newChatName, setNewChatName] = useState('');
+  const [newChatPlatform, setNewChatPlatform] = useState('whatsapp');
+  const [creatingChat, setCreatingChat] = useState(false);
+
+  // Keep ref in sync
   useEffect(() => {
     activeConvIdRef.current = activeConvId;
   }, [activeConvId]);
 
+  // Initial load
   useEffect(() => { 
     loadConversations(); 
     loadChannels();
+  }, []);
 
-    // Poll conversations every 5 seconds
+  // Poll conversations every 5 seconds
+  useEffect(() => {
     const interval = setInterval(() => {
       api.get('/api/conversations').then(({ data }) => {
         setConversations(data.conversations || []);
-      }).catch(err => console.error('Silent poll error:', err));
+      }).catch(() => {}); // silent
     }, 5000);
-
     return () => clearInterval(interval);
   }, []);
 
+  // Poll messages for active conversation every 3 seconds
   useEffect(() => {
     if (!activeConvId) return;
-    // Poll messages for active conversation every 5 seconds
     const interval = setInterval(() => {
       api.get(`/api/conversations/${activeConvId}/messages`).then(({ data }) => {
         if (activeConvIdRef.current === activeConvId) {
           setMessages(data.messages || []);
-          setConversations(convs => convs.map(c => c.id === activeConvId ? { ...c, unreadCount: 0 } : c));
         }
-      }).catch(err => console.error('Silent poll msgs error:', err));
-    }, 5000);
-
+      }).catch(() => {}); // silent
+    }, 3000);
     return () => clearInterval(interval);
   }, [activeConvId]);
 
+  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
@@ -83,11 +92,12 @@ export default function Inbox() {
     try {
       const { data } = await api.get('/api/conversations');
       setConversations(data.conversations || []);
-      if (data.conversations?.length > 0 && !activeConvId) {
+      if (data.conversations?.length > 0 && !activeConvIdRef.current) {
         selectConversation(data.conversations[0].id);
       }
     } catch (err) {
       console.error('Load conversations error:', err);
+      toast('Failed to load conversations', 'error');
     } finally {
       setLoading(false);
     }
@@ -145,6 +155,34 @@ export default function Inbox() {
     }
   };
 
+  const createNewConversation = async () => {
+    if (!newChatPhone.trim()) {
+      toast('Phone number is required', 'error');
+      return;
+    }
+    setCreatingChat(true);
+    try {
+      const { data } = await api.post('/api/conversations', {
+        platform: newChatPlatform,
+        customerPhone: newChatPhone.trim(),
+        customerName: newChatName.trim() || undefined,
+      });
+      // Add to list if new
+      if (!data.existed) {
+        setConversations(prev => [data.conversation, ...prev]);
+      }
+      selectConversation(data.conversation.id);
+      setShowNewChat(false);
+      setNewChatPhone('');
+      setNewChatName('');
+      toast(data.existed ? 'Conversation opened' : 'New conversation created', 'success');
+    } catch (err) {
+      toast(err.message || 'Failed to create conversation', 'error');
+    } finally {
+      setCreatingChat(false);
+    }
+  };
+
   const sendMessage = async () => {
     const msgText = text.trim();
     if (!msgText || !activeConvId) return;
@@ -160,7 +198,7 @@ export default function Inbox() {
           : c
       ));
     } catch (err) {
-      setText(msgText); // Restore text on failure so user doesn't lose their message
+      setText(msgText); // Restore text on failure
       toast(err.message || 'Failed to send message', 'error');
     } finally {
       setSending(false);
@@ -226,16 +264,29 @@ export default function Inbox() {
             <div className="inbox-layout">
               {/* Conversation List */}
           <div className="inbox-list">
-            <div className="inbox-search">
-              <div style={{ position: 'relative' }}>
+            <div className="inbox-search" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div style={{ position: 'relative', flex: 1 }}>
                 <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                 <input type="text" className="form-input" style={{ paddingLeft: 32, fontSize: '0.8rem' }} placeholder="Search conversations..." value={search} onChange={e => setSearch(e.target.value)} />
               </div>
+              <button 
+                className="btn btn-primary btn-icon btn-sm" 
+                onClick={() => setShowNewChat(true)} 
+                title="Start new conversation"
+                style={{ padding: '8px', flexShrink: 0 }}
+              >
+                <Plus size={16} />
+              </button>
             </div>
             {loading ? (
               <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ width: 20, height: 20 }} /></div>
             ) : filtered.length === 0 ? (
-              <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>No conversations yet</div>
+              <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                <p>No conversations yet</p>
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowNewChat(true)} style={{ marginTop: 8 }}>
+                  <Plus size={14} /> Start New Chat
+                </button>
+              </div>
             ) : filtered.map(conv => {
               const PlatformIcon = platformIcons[conv.platform]?.icon || MessageCircle;
               const platformColor = platformIcons[conv.platform]?.color || '#6366f1';
@@ -280,6 +331,7 @@ export default function Inbox() {
                   <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{activeConv.customerName || 'Unknown'}</div>
                   <div style={{ fontSize: '0.75rem', color: platformIcons[activeConv.platform]?.color }}>
                     via {platformIcons[activeConv.platform]?.label || activeConv.platform}
+                    {activeConv.waContactId && <span style={{ marginLeft: 6, color: 'var(--text-muted)' }}>• {activeConv.waContactId}</span>}
                   </div>
                 </div>
                 <button className="btn btn-secondary btn-sm" onClick={sendBookingLink} title="Send booking link">
@@ -288,6 +340,11 @@ export default function Inbox() {
               </div>
 
               <div className="chat-messages">
+                {messages.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                    No messages yet. Send the first message below.
+                  </div>
+                )}
                 {messages.map((msg, i) => (
                   <div key={msg.id || i} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.fromRole === 'business' ? 'flex-end' : 'flex-start' }}>
                     <div className={`message ${msg.fromRole === 'business' ? 'message-outgoing' : 'message-incoming'}`} style={{ whiteSpace: 'pre-wrap' }}>
@@ -301,7 +358,7 @@ export default function Inbox() {
 
               <div className="chat-input-area">
                 <textarea className="chat-input" placeholder="Type a message... (Enter to send)" value={text} onChange={e => setText(e.target.value)} onKeyDown={handleKeyDown} rows={1} />
-                <button className="btn btn-primary btn-icon" onClick={sendMessage} disabled={!text.trim() || sending} style={{ padding: '10px 14px' }}>
+                <button className="btn btn-primary btn-icon" onClick={sendMessage} disabled={sending} style={{ padding: '10px 14px' }}>
                   <Send size={16} />
                 </button>
               </div>
@@ -310,6 +367,11 @@ export default function Inbox() {
             <div className="empty-state">
               <div className="empty-state-icon"><MessageCircle size={32} /></div>
               <div style={{ fontWeight: 600 }}>{loading ? 'Loading...' : 'Select a conversation'}</div>
+              {!loading && conversations.length === 0 && (
+                <button className="btn btn-primary" onClick={() => setShowNewChat(true)} style={{ marginTop: 12 }}>
+                  <Plus size={16} /> Start New Conversation
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -404,6 +466,64 @@ export default function Inbox() {
           </div>
         )}
       </div>
+
+      {/* New Chat Modal */}
+      {showNewChat && (
+        <div className="modal-overlay" onClick={() => setShowNewChat(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-header">
+              <h3 style={{ fontSize: '1.1rem' }}>Start New Conversation</h3>
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setShowNewChat(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label className="form-label">Platform</label>
+                <select 
+                  className="form-input" 
+                  value={newChatPlatform} 
+                  onChange={e => setNewChatPlatform(e.target.value)}
+                >
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="instagram">Instagram</option>
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Phone Number / ID *</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  placeholder="e.g. 919876543210" 
+                  value={newChatPhone} 
+                  onChange={e => setNewChatPhone(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createNewConversation()}
+                />
+                <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                  Enter phone number with country code (no + or spaces)
+                </small>
+              </div>
+              <div>
+                <label className="form-label">Customer Name (optional)</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  placeholder="e.g. Rahul Sharma" 
+                  value={newChatName} 
+                  onChange={e => setNewChatName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createNewConversation()}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowNewChat(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={createNewConversation} disabled={creatingChat || !newChatPhone.trim()}>
+                {creatingChat ? 'Creating...' : 'Start Chat'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showConnectModal && (
         <ConnectChannelModal 
