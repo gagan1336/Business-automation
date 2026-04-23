@@ -32,6 +32,7 @@ export default function Inbox() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef(null);
+  const activeConvIdRef = useRef(activeConvId);
 
   // Channels state
   const [activeTab, setActiveTab] = useState('messages'); // 'messages' | 'channels'
@@ -40,10 +41,38 @@ export default function Inbox() {
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [editingChannel, setEditingChannel] = useState(null);
 
+  useEffect(() => {
+    activeConvIdRef.current = activeConvId;
+  }, [activeConvId]);
+
   useEffect(() => { 
     loadConversations(); 
     loadChannels();
+
+    // Poll conversations every 5 seconds
+    const interval = setInterval(() => {
+      api.get('/api/conversations').then(({ data }) => {
+        setConversations(data.conversations || []);
+      }).catch(err => console.error('Silent poll error:', err));
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!activeConvId) return;
+    // Poll messages for active conversation every 5 seconds
+    const interval = setInterval(() => {
+      api.get(`/api/conversations/${activeConvId}/messages`).then(({ data }) => {
+        if (activeConvIdRef.current === activeConvId) {
+          setMessages(data.messages || []);
+          setConversations(convs => convs.map(c => c.id === activeConvId ? { ...c, unreadCount: 0 } : c));
+        }
+      }).catch(err => console.error('Silent poll msgs error:', err));
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [activeConvId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -117,19 +146,21 @@ export default function Inbox() {
   };
 
   const sendMessage = async () => {
-    if (!text.trim() || !activeConvId) return;
+    const msgText = text.trim();
+    if (!msgText || !activeConvId) return;
     setSending(true);
+    setText(''); // Clear input immediately for snappy UX
     try {
-      const { data } = await api.post(`/api/conversations/${activeConvId}/messages`, { text: text.trim() });
+      const { data } = await api.post(`/api/conversations/${activeConvId}/messages`, { text: msgText });
       setMessages(prev => [...prev, data.message]);
-      setText('');
-      // Update conversation list
+      // Update conversation list preview
       setConversations(convs => convs.map(c =>
         c.id === activeConvId
-          ? { ...c, lastMessageAt: new Date().toISOString(), messages: [{ text: text.trim(), fromRole: 'business' }] }
+          ? { ...c, lastMessageAt: new Date().toISOString(), messages: [{ text: msgText, fromRole: 'business' }] }
           : c
       ));
     } catch (err) {
+      setText(msgText); // Restore text on failure so user doesn't lose their message
       toast(err.message || 'Failed to send message', 'error');
     } finally {
       setSending(false);

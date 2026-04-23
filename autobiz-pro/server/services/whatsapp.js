@@ -8,14 +8,17 @@ const BASE_URL = 'https://graph.facebook.com/v19.0';
  * @param {string} to   - Recipient phone number in international format (e.g. 919876543210)
  * @param {string} text - Message body
  */
-async function sendTextMessage(to, text) {
-  if (!process.env.META_ACCESS_TOKEN || !process.env.META_PHONE_NUMBER_ID) {
+async function sendTextMessage(to, text, credentials = null) {
+  const token = credentials?.accessToken || process.env.META_ACCESS_TOKEN;
+  const phoneId = credentials?.phoneNumberId || process.env.META_PHONE_NUMBER_ID;
+
+  if (!token || !phoneId) {
     console.warn('[WhatsApp] Credentials not configured — message not sent');
     return null;
   }
   try {
     const { data } = await axios.post(
-      `${BASE_URL}/${process.env.META_PHONE_NUMBER_ID}/messages`,
+      `${BASE_URL}/${phoneId}/messages`,
       {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -25,7 +28,7 @@ async function sendTextMessage(to, text) {
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       }

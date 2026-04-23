@@ -79,7 +79,14 @@ router.post('/:id/messages', firebaseAuth, async (req, res) => {
 
     // Send via WhatsApp
     if (conv.platform === 'whatsapp' && conv.waContactId) {
-      sendTextMessage(conv.waContactId, text.trim()).catch(console.error);
+      const channel = await prisma.channel.findFirst({
+        where: { businessId: business.id, platform: 'whatsapp', active: true }
+      });
+      if (channel) {
+        sendTextMessage(conv.waContactId, text.trim(), channel).catch(console.error);
+      } else {
+        sendTextMessage(conv.waContactId, text.trim()).catch(console.error); // fallback
+      }
     }
 
     // Cancel pending follow-up since business just replied
