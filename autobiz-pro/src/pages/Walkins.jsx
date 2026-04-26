@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { UserPlus, Clock, Phone, Scissors, DollarSign, Check, X } from 'lucide-react';
 import Topbar from '../components/Topbar';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import api from '../api/client';
 
@@ -11,6 +12,8 @@ export default function Walkins() {
   const [form, setForm] = useState({ name: '', phone: '', service: '', amount: '', notes: '' });
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
+  const [currency, setCurrency] = useState('$');
+  const { user } = useAuth();
   const upd = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   useEffect(() => { loadData(); }, []);
@@ -22,9 +25,13 @@ export default function Walkins() {
       const [wRes, sRes] = await Promise.all([
         api.get(`/api/walkins?date=${today}`),
         api.get('/api/services'),
+        api.get('/api/auth/me'),
       ]);
       setWalkins(wRes.data.walkins || []);
       setServices(sRes.data.services || []);
+      if (meRes.data?.business?.settings?.currencySymbol) {
+        setCurrency(meRes.data.business.settings.currencySymbol);
+      }
     } catch (err) {
       console.error('Load walkins error:', err);
     } finally {
@@ -35,7 +42,7 @@ export default function Walkins() {
   const handleServiceChange = (svcName) => {
     const svc = services.find(s => s.name === svcName);
     upd('service', svcName);
-    if (svc) upd('amount', svc.price.toString());
+    if (svc) upd('amount', ((svc.priceCents || svc.price || 0) / 100).toString());
   };
 
   const handleSubmit = async (e) => {
@@ -47,7 +54,7 @@ export default function Walkins() {
         customerName: form.name,
         phone: form.phone,
         service: form.service,
-        amount: parseInt(form.amount) || 0,
+        amount: parseFloat(form.amount) || 0,
       });
       toast(`Walk-in saved! Thank-you message sent to ${form.name} 📱`, 'success');
       setForm({ name: '', phone: '', service: '', amount: '', notes: '' });
@@ -92,7 +99,7 @@ export default function Walkins() {
                   <label className="form-label">Phone Number *</label>
                   <div style={{ position: 'relative' }}>
                     <Phone size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <input type="tel" className="form-input" style={{ paddingLeft: 36 }} placeholder="+91 98765 43210" value={form.phone} onChange={e => upd('phone', e.target.value)} required />
+                    <input type="tel" className="form-input" style={{ paddingLeft: 36 }} placeholder="+1 555 123 4567" value={form.phone} onChange={e => upd('phone', e.target.value)} required />
                   </div>
                 </div>
 
@@ -102,16 +109,16 @@ export default function Walkins() {
                     <Scissors size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', zIndex: 1 }} />
                     <select className="form-select" style={{ paddingLeft: 36 }} value={form.service} onChange={e => handleServiceChange(e.target.value)} required>
                       <option value="">Select service...</option>
-                      {services.map(s => <option key={s.id} value={s.name}>{s.name} — ₹{s.price} ({s.durationMin} min)</option>)}
+                      {services.map(s => <option key={s.id} value={s.name}>{s.name} — {currency}{((s.priceCents || s.price || 0) / 100).toFixed(2)} ({s.durationMin} min)</option>)}
                     </select>
                   </div>
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Amount (₹)</label>
+                  <label className="form-label">Amount ({currency})</label>
                   <div style={{ position: 'relative' }}>
                     <DollarSign size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <input type="number" className="form-input" style={{ paddingLeft: 36 }} placeholder="0" value={form.amount} onChange={e => upd('amount', e.target.value)} />
+                    <input type="number" step="0.01" className="form-input" style={{ paddingLeft: 36 }} placeholder="0.00" value={form.amount} onChange={e => upd('amount', e.target.value)} />
                   </div>
                 </div>
 
@@ -136,7 +143,7 @@ export default function Walkins() {
               </div>
               <div className="stat-card">
                 <div className="stat-card-icon" style={{ background: 'var(--gradient-success)' }}><DollarSign size={18} color="#fff" /></div>
-                <div className="stat-card-value" style={{ background: 'var(--gradient-success)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>₹{totalRevenue.toLocaleString()}</div>
+                <div className="stat-card-value" style={{ background: 'var(--gradient-success)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{currency}{totalRevenue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                 <div className="stat-card-label">Revenue (Walk-ins)</div>
               </div>
             </div>
@@ -166,8 +173,8 @@ export default function Walkins() {
                             </div>
                           </td>
                           <td style={{ fontSize: '0.875rem' }}>{w.service}</td>
-                          <td><span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem' }}><Clock size={12} style={{ color: 'var(--text-muted)' }} /> {new Date(w.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span></td>
-                          <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>₹{w.amount}</td>
+                          <td><span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem' }}><Clock size={12} style={{ color: 'var(--text-muted)' }} /> {new Date(w.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span></td>
+                          <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>{currency}{w.amount?.toFixed(2) || '0.00'}</td>
                         </tr>
                       ))}
                     </tbody>

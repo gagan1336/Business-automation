@@ -305,7 +305,7 @@ export default function Inbox() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span className="inbox-item-name">{conv.customerName || 'Unknown'}</span>
-                        <span className="inbox-item-time">{conv.lastMessageAt ? new Date(conv.lastMessageAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                        <span className="inbox-item-time">{conv.lastMessageAt ? new Date(conv.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                         <span className="inbox-item-preview" style={{ flex: 1 }}>{lastMsg?.text || '...'}</span>
@@ -350,7 +350,7 @@ export default function Inbox() {
                     <div className={`message ${msg.fromRole === 'business' ? 'message-outgoing' : 'message-incoming'}`} style={{ whiteSpace: 'pre-wrap' }}>
                       {msg.text}
                     </div>
-                    <div className="message-time">{new Date(msg.sentAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+                    <div className="message-time">{new Date(msg.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                   </div>
                 ))}
                 <div ref={messagesEndRef} />
@@ -494,7 +494,7 @@ export default function Inbox() {
                 <input 
                   type="text" 
                   className="form-input" 
-                  placeholder="e.g. 919876543210" 
+                  placeholder="e.g. 15551234567" 
                   value={newChatPhone} 
                   onChange={e => setNewChatPhone(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && createNewConversation()}
@@ -508,7 +508,7 @@ export default function Inbox() {
                 <input 
                   type="text" 
                   className="form-input" 
-                  placeholder="e.g. Rahul Sharma" 
+                  placeholder="e.g. John Smith" 
                   value={newChatName} 
                   onChange={e => setNewChatName(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && createNewConversation()}
