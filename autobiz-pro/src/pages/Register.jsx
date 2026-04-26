@@ -6,7 +6,7 @@ import { useToast } from '../context/ToastContext';
 
 export default function Register() {
   const [step, setStep] = useState(1); // 1 = Google sign-in, 2 = business details
-  const [form, setForm] = useState({ businessName: '', ownerName: '', phone: '', category: 'Salon & Spa' });
+  const [form, setForm] = useState({ businessName: '', ownerName: '', phone: '', category: 'Service Business' });
   const [loading, setLoading] = useState(false);
   const { user, loginWithGoogle, registerBusiness } = useAuth();
   const { toast } = useToast();
@@ -74,12 +74,12 @@ export default function Register() {
   };
 
   const fields = [
-    { key: 'businessName', label: 'Business Name *', type: 'text', icon: Briefcase, placeholder: 'HairCraft Salon' },
-    { key: 'ownerName', label: 'Owner Name *', type: 'text', icon: User, placeholder: 'Rahul Sharma' },
-    { key: 'phone', label: 'Phone Number *', type: 'tel', icon: Phone, placeholder: '+91 98765 43210' },
+    { key: 'businessName', label: 'Business Name *', type: 'text', icon: Briefcase, placeholder: 'Acme Services' },
+    { key: 'ownerName', label: 'Owner Name *', type: 'text', icon: User, placeholder: 'John Smith' },
+    { key: 'phone', label: 'Phone Number *', type: 'tel', icon: Phone, placeholder: '+1 555 123 4567' },
   ];
 
-  const categories = ['Salon & Spa', 'Barbershop', 'Fitness', 'Yoga', 'Medical', 'Restaurant', 'Other'];
+  const categories = ['Service Business', 'Salon & Beauty', 'Health & Wellness', 'Fitness & Training', 'Professional Services', 'Education & Coaching', 'Pet Services', 'Photography & Creative', 'Other'];
 
   return (
     <div className="auth-page">

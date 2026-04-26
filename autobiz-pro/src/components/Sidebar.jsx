@@ -2,12 +2,13 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   LayoutDashboard, Calendar, MessageSquare, Zap, UserPlus,
-  Users, Settings, LogOut, Sparkles
+  Users, Settings, LogOut, Sparkles, UsersRound
 } from 'lucide-react';
 
 const navItems = [
   { label: 'Dashboard', icon: LayoutDashboard, path: '/app/dashboard' },
   { label: 'Bookings', icon: Calendar, path: '/app/bookings' },
+  { label: 'Team', icon: UsersRound, path: '/app/team' },
   { label: 'Inbox', icon: MessageSquare, path: '/app/inbox' },
   { label: 'Automation', icon: Zap, path: '/app/automation' },
   { label: 'Walk-ins', icon: UserPlus, path: '/app/walkins' },

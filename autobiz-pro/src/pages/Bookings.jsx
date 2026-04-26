@@ -1,145 +1,53 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Calendar, Clock, X } from 'lucide-react';
+import { Calendar, Search, Filter, X, Clock, Check, ChevronLeft, ChevronRight, Plus, XCircle, UserX } from 'lucide-react';
 import Topbar from '../components/Topbar';
 import { useToast } from '../context/ToastContext';
 import api from '../api/client';
 
+const STATUS_OPTIONS = [
+  { value: 'all', label: 'All Statuses' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'no_show', label: 'No Show' },
+];
+
 const statusColors = {
-  confirmed: { color: 'var(--color-success)', bg: 'var(--color-success-glow)', label: 'Confirmed' },
-  pending:   { color: 'var(--color-warning)', bg: 'var(--color-warning-glow)', label: 'Pending' },
-  completed: { color: 'var(--color-accent)', bg: 'var(--color-accent-glow)', label: 'Completed' },
-  cancelled: { color: 'var(--color-danger)', bg: 'var(--color-danger-glow)', label: 'Cancelled' },
+  confirmed: { color: 'var(--color-success)', bg: 'var(--color-success-glow)' },
+  pending:   { color: 'var(--color-warning)', bg: 'var(--color-warning-glow)' },
+  completed: { color: 'var(--color-accent)', bg: 'var(--color-accent-glow)' },
+  cancelled: { color: 'var(--color-danger)', bg: 'var(--color-danger-glow)' },
+  no_show:   { color: 'var(--color-danger)', bg: 'var(--color-danger-glow)' },
 };
-
-function BookingModal({ booking, onClose, onStatusChange }) {
-  if (!booking) return null;
-  const sc = statusColors[booking.status] || statusColors.pending;
-  const name = booking.customer?.name || 'Walk-in';
-  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <div className="modal-header">
-          <h3 className="modal-title">Booking Details</h3>
-          <button className="modal-close" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 0', borderBottom: '1px solid var(--color-border)', marginBottom: 20 }}>
-          <div className="avatar" style={{ width: 52, height: 52, fontSize: '1.1rem', background: (booking.customer?.avatarColor || '#6366f1') + '25', color: booking.customer?.avatarColor || '#6366f1' }}>{initials}</div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: '1rem' }}>{name}</div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{booking.customer?.phone || ''}</div>
-          </div>
-          <span className="badge" style={{ background: sc.bg, color: sc.color, marginLeft: 'auto' }}>{sc.label}</span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
-          {[
-            { label: 'Service', value: booking.service?.name || '-' },
-            { label: 'Amount', value: `₹${booking.amount}` },
-            { label: 'Date', value: booking.date },
-            { label: 'Time', value: booking.time },
-          ].map(({ label, value }) => (
-            <div key={label}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
-              <div style={{ fontWeight: 600 }}>{value}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {['confirmed', 'completed', 'cancelled'].map(s => s !== booking.status && (
-            <button key={s} className={`btn btn-sm ${s === 'cancelled' ? 'btn-danger' : s === 'completed' ? 'btn-success' : 'btn-primary'}`}
-              onClick={() => onStatusChange(booking.id, s)}>
-              Mark {statusColors[s].label}
-            </button>
-          ))}
-          <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AddBookingModal({ onClose, onSave, services }) {
-  const [form, setForm] = useState({ customer: '', phone: '', serviceId: '', date: '', time: '', amount: '' });
-  const upd = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <div className="modal-header">
-          <h3 className="modal-title">New Booking</h3>
-          <button className="modal-close" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div className="form-group">
-              <label className="form-label">Customer Name</label>
-              <input type="text" className="form-input" placeholder="Full name" value={form.customer} onChange={e => upd('customer', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Phone</label>
-              <input type="tel" className="form-input" placeholder="+91..." value={form.phone} onChange={e => upd('phone', e.target.value)} />
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Service</label>
-            <select className="form-select" value={form.serviceId} onChange={e => {
-              const svc = services.find(s => s.id === e.target.value);
-              upd('serviceId', e.target.value);
-              if (svc) upd('amount', svc.price.toString());
-            }}>
-              <option value="">Select service...</option>
-              {services.map(s => <option key={s.id} value={s.id}>{s.name} — ₹{s.price}</option>)}
-            </select>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div className="form-group">
-              <label className="form-label">Date</label>
-              <input type="date" className="form-input" value={form.date} onChange={e => upd('date', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Time</label>
-              <input type="time" className="form-input" value={form.time} onChange={e => upd('time', e.target.value)} />
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Amount (₹)</label>
-            <input type="number" className="form-input" placeholder="0" value={form.amount} onChange={e => upd('amount', e.target.value)} />
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
-          <button className="btn btn-secondary" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => onSave(form)}>Confirm Booking</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function Bookings() {
   const { toast } = useToast();
   const [bookings, setBookings] = useState([]);
-  const [services, setServices] = useState([]);
-  const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [selectedBooking, setSelectedBooking] = useState(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [activeTab, setActiveTab] = useState('all');
   const [loading, setLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [search, setSearch] = useState('');
   const [total, setTotal] = useState(0);
+  const [currency, setCurrency] = useState('$');
 
-  const today = new Date().toISOString().split('T')[0];
+  useEffect(() => { loadBookings(); }, [selectedDate, statusFilter]);
 
-  useEffect(() => { loadData(); }, []);
-
-  const loadData = async () => {
+  const loadBookings = async () => {
     setLoading(true);
     try {
-      const [bRes, sRes] = await Promise.all([
-        api.get('/api/bookings?limit=100'),
-        api.get('/api/services'),
-      ]);
-      setBookings(bRes.data.bookings || []);
-      setTotal(bRes.data.total || 0);
-      setServices(sRes.data.services || []);
+      const params = new URLSearchParams({ date: selectedDate });
+      if (statusFilter !== 'all') params.append('status', statusFilter);
+
+      const { data } = await api.get(`/api/bookings?${params}`);
+      setBookings(data.bookings || []);
+      setTotal(data.total || 0);
+
+      // Get currency from settings
+      try {
+        const { data: meData } = await api.get('/api/auth/me');
+        setCurrency(meData.business?.settings?.currencySymbol || '$');
+      } catch {}
     } catch (err) {
       toast('Failed to load bookings', 'error');
     } finally {
@@ -147,98 +55,89 @@ export default function Bookings() {
     }
   };
 
-  const tabs = [
-    { key: 'all', label: 'All Bookings' },
-    { key: 'today', label: "Today" },
-    { key: 'upcoming', label: 'Upcoming' },
-  ];
+  const updateStatus = async (id, status) => {
+    try {
+      await api.patch(`/api/bookings/${id}`, { status });
+      toast(`Booking ${status === 'no_show' ? 'marked as no-show' : status}!`, 'success');
+      loadBookings();
+    } catch (err) {
+      toast(err.message || 'Failed to update', 'error');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Are you sure you want to delete this booking?')) return;
+    try {
+      await api.delete(`/api/bookings/${id}`);
+      toast('Booking deleted', 'success');
+      loadBookings();
+    } catch (err) {
+      toast(err.message || 'Failed to delete', 'error');
+    }
+  };
+
+  const changeDate = (offset) => {
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() + offset);
+    setSelectedDate(d.toISOString().split('T')[0]);
+  };
 
   const filtered = bookings.filter(b => {
     const name = b.customer?.name || '';
-    const svc = b.service?.name || '';
-    const matchSearch = name.toLowerCase().includes(search.toLowerCase()) || svc.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = filterStatus === 'all' || b.status === filterStatus;
-    const matchTab = activeTab === 'all' ? true : activeTab === 'today' ? b.date === today : b.date > today;
-    return matchSearch && matchStatus && matchTab;
+    return name.toLowerCase().includes(search.toLowerCase());
   });
 
-  const handleStatusChange = async (id, status) => {
-    try {
-      await api.patch(`/api/bookings/${id}`, { status });
-      setBookings(bks => bks.map(b => b.id === id ? { ...b, status } : b));
-      toast(`Booking marked as ${statusColors[status].label}`, 'success');
-      setSelectedBooking(null);
-    } catch (err) {
-      toast(err.message || 'Failed to update booking', 'error');
-    }
-  };
-
-  const handleSave = async (form) => {
-    if (!form.customer || !form.date || !form.time) { toast('Please fill required fields', 'error'); return; }
-    try {
-      await api.post('/api/bookings', {
-        customerName: form.customer,
-        phone: form.phone,
-        serviceId: form.serviceId || undefined,
-        date: form.date,
-        time: form.time,
-        amount: form.amount || 0,
-      });
-      toast(`Booking added for ${form.customer}!`, 'success');
-      setShowAdd(false);
-      loadData();
-    } catch (err) {
-      toast(err.message || 'Failed to create booking', 'error');
-    }
-  };
+  const dateLabel = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const isToday = selectedDate === new Date().toISOString().split('T')[0];
 
   return (
     <>
-      <Topbar title="Bookings" subtitle="Manage all your appointments" />
+      <Topbar title="Bookings" subtitle={`${total} appointments · ${dateLabel}`} />
       <div className="page-content">
-        {/* Tabs */}
-        <div style={{ display: 'flex', gap: 4, background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: 4, marginBottom: 24, width: 'fit-content' }}>
-          {tabs.map(t => (
-            <button key={t.key} onClick={() => setActiveTab(t.key)}
-              style={{ padding: '8px 20px', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 600, transition: 'all 0.2s',
-                background: activeTab === t.key ? 'var(--gradient-primary)' : 'transparent',
-                color: activeTab === t.key ? '#fff' : 'var(--text-secondary)' }}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
-            <Search size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-            <input type="text" className="form-input" style={{ paddingLeft: 38 }} placeholder="Search customer or service..." value={search} onChange={e => setSearch(e.target.value)} />
+        {/* Controls */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '4px 8px' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => changeDate(-1)}><ChevronLeft size={16} /></button>
+            <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '0.85rem', padding: '4px 8px', cursor: 'pointer' }} />
+            <button className="btn btn-ghost btn-sm" onClick={() => changeDate(1)}><ChevronRight size={16} /></button>
           </div>
-          <select className="form-select" style={{ width: 'auto' }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-            <option value="all">All Status</option>
-            {Object.entries(statusColors).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          {!isToday && (
+            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}>Today</button>
+          )}
+          <select className="form-select" style={{ width: 'auto', padding: '8px 12px', fontSize: '0.8rem' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
-          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
-            <Plus size={16} /> New Booking
-          </button>
+          <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input type="text" className="form-input" style={{ paddingLeft: 32, fontSize: '0.8rem' }} placeholder="Search client..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
         </div>
 
+        {/* Table */}
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="table-wrapper" style={{ border: 'none', borderRadius: 0 }}>
             <table className="table">
               <thead>
                 <tr>
-                  <th>Customer</th><th>Service</th><th>Date</th><th>Time</th><th>Amount</th><th>Status</th><th style={{ textAlign: 'right' }}>Action</th>
+                  <th>Client</th>
+                  <th>Service</th>
+                  <th>Team</th>
+                  <th>Time</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={7}><div className="empty-state"><div className="spinner" style={{ width: 24, height: 24 }} /></div></td></tr>
+                  <tr><td colSpan={7}><div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><div className="spinner" style={{ width: 24, height: 24 }} /></div></td></tr>
                 ) : filtered.length === 0 ? (
                   <tr><td colSpan={7}>
-                    <div className="empty-state">
+                    <div className="empty-state" style={{ padding: 48 }}>
                       <div className="empty-state-icon"><Calendar size={28} /></div>
                       <div style={{ fontWeight: 600 }}>No bookings found</div>
-                      <p style={{ fontSize: '0.85rem' }}>Adjust your filters or add a new booking.</p>
+                      <p style={{ fontSize: '0.8rem' }}>No appointments for this date and filter combination.</p>
                     </div>
                   </td></tr>
                 ) : filtered.map(b => {
@@ -246,23 +145,54 @@ export default function Bookings() {
                   const name = b.customer?.name || 'Walk-in';
                   const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
                   return (
-                    <tr key={b.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedBooking(b)}>
+                    <tr key={b.id}>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <div className="avatar" style={{ background: (b.customer?.avatarColor || '#6366f1') + '25', color: b.customer?.avatarColor || '#6366f1' }}>{initials}</div>
                           <div>
                             <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{name}</div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{b.customer?.phone || ''}</div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{b.customer?.phone || ''}</div>
                           </div>
                         </div>
                       </td>
-                      <td style={{ fontSize: '0.875rem' }}>{b.service?.name || '-'}</td>
-                      <td><div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem' }}><Calendar size={12} style={{ color: 'var(--text-muted)' }} /> {b.date}</div></td>
-                      <td><div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem' }}><Clock size={12} style={{ color: 'var(--text-muted)' }} /> {b.time}</div></td>
-                      <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>₹{b.amount}</td>
-                      <td><span className="badge" style={{ background: sc.bg, color: sc.color, textTransform: 'capitalize' }}>{b.status}</span></td>
-                      <td style={{ textAlign: 'right' }}>
-                        <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setSelectedBooking(b); }}>Details</button>
+                      <td style={{ fontSize: '0.85rem' }}>{b.service?.name || '-'}</td>
+                      <td>
+                        {b.staffMember ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={{ width: 22, height: 22, borderRadius: '50%', background: (b.staffMember.avatarColor || '#6366f1') + '25', color: b.staffMember.avatarColor || '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', fontWeight: 700 }}>
+                              {b.staffMember.name?.[0]?.toUpperCase() || '?'}
+                            </div>
+                            <span style={{ fontSize: '0.8rem' }}>{b.staffMember.name}</span>
+                          </div>
+                        ) : <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>}
+                      </td>
+                      <td>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.85rem' }}>
+                          <Clock size={12} style={{ color: 'var(--text-muted)' }} /> {b.time}
+                        </span>
+                      </td>
+                      <td style={{ fontWeight: 700, color: 'var(--color-success)', fontSize: '0.85rem' }}>
+                        {currency}{b.amount || (b.amountCents ? (b.amountCents / 100).toFixed(2) : '0.00')}
+                      </td>
+                      <td>
+                        <span className="badge" style={{ background: sc.bg, color: sc.color, textTransform: 'capitalize', fontSize: '0.72rem' }}>
+                          {b.status === 'no_show' ? 'No Show' : b.status}
+                        </span>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {b.status === 'pending' && (
+                            <button className="btn btn-ghost btn-sm" title="Confirm" onClick={() => updateStatus(b.id, 'confirmed')}><Check size={13} style={{ color: 'var(--color-success)' }} /></button>
+                          )}
+                          {(b.status === 'confirmed' || b.status === 'pending') && (
+                            <>
+                              <button className="btn btn-ghost btn-sm" title="Complete" onClick={() => updateStatus(b.id, 'completed')}><Check size={13} /></button>
+                              <button className="btn btn-ghost btn-sm" title="No Show" onClick={() => updateStatus(b.id, 'no_show')}><UserX size={13} style={{ color: 'var(--color-warning)' }} /></button>
+                              <button className="btn btn-ghost btn-sm" title="Cancel" onClick={() => updateStatus(b.id, 'cancelled')}><XCircle size={13} style={{ color: 'var(--color-danger)' }} /></button>
+                            </>
+                          )}
+                          <button className="btn btn-ghost btn-sm" title="Delete" onClick={() => handleDelete(b.id)}><X size={13} style={{ color: 'var(--text-muted)' }} /></button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -271,13 +201,7 @@ export default function Bookings() {
             </table>
           </div>
         </div>
-        <div style={{ marginTop: 12, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-          Showing {filtered.length} of {total} bookings
-        </div>
       </div>
-
-      {selectedBooking && <BookingModal booking={selectedBooking} onClose={() => setSelectedBooking(null)} onStatusChange={handleStatusChange} />}
-      {showAdd && <AddBookingModal onClose={() => setShowAdd(false)} onSave={handleSave} services={services} />}
     </>
   );
 }

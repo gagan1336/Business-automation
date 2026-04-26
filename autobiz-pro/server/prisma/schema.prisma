@@ -1,5 +1,8 @@
-// AutoBiz Pro — Prisma Schema
+// ══════════════════════════════════════════════════════════════════
+// Premium SaaS Booking Platform — Prisma Schema
 // Database: PostgreSQL (hosted on Supabase)
+// All money values in INTEGER CENTS. All timestamps in UTC.
+// ══════════════════════════════════════════════════════════════════
 
 generator client {
   provider = "prisma-client-js"
@@ -11,16 +14,16 @@ datasource db {
 }
 
 // ────────────────────────────────────────────────
-// BUSINESS (one per salon/shop — multi-tenant SaaS)
+// BUSINESS (multi-tenant root entity)
 // ────────────────────────────────────────────────
 model Business {
   id          String   @id @default(cuid())
   name        String
-  slug        String   @unique  // e.g. "haircraft-pro" for /book/haircraft-pro
+  slug        String   @unique  // e.g. "modern-studio" for /book/modern-studio
   ownerName   String
   phone       String
   email       String   @unique
-  category    String   @default("Salon & Spa")
+  category    String   @default("Service Business")
   address     String?
   website     String?
   logoUrl     String?
@@ -31,21 +34,81 @@ model Business {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  services      Service[]
-  bookings      Booking[]
-  customers     Customer[]
-  walkins       Walkin[]
-  conversations Conversation[]
-  automations   Automation[]
-  channels      Channel[]
+  // Relations
+  settings       BusinessSettings?
+  staff          StaffMember[]
+  services       Service[]
+  bookings       Booking[]
+  customers      Customer[]
+  walkins        Walkin[]
+  conversations  Conversation[]
+  automations    Automation[]
+  channels       Channel[]
   analyticsDaily AnalyticsDaily[]
+  scheduledTasks ScheduledTask[]
+  auditLogs      AuditLog[]
 
   @@index([slug])
   @@index([firebaseUid])
 }
 
 // ────────────────────────────────────────────────
-// SERVICES (treatments/offerings for a business)
+// BUSINESS SETTINGS (per-tenant configuration)
+// ────────────────────────────────────────────────
+model BusinessSettings {
+  id                      String  @id @default(cuid())
+  businessId              String  @unique
+  timezone                String  @default("America/New_York")
+  currency                String  @default("USD")
+  currencySymbol          String  @default("$")
+  locale                  String  @default("en-US")
+  dateFormat              String  @default("MM/DD/YYYY")
+  clockFormat             String  @default("12h")    // 12h | 24h
+  bufferMinutes           Int     @default(10)       // gap between bookings
+  bookingWindowDays       Int     @default(30)       // how far ahead customers can book
+  brandColor              String  @default("#6366f1")
+  marketingConsentRequired Boolean @default(true)
+  autoReminder24h         Boolean @default(true)
+  autoReminder2h          Boolean @default(true)
+  autoReviewRequest       Boolean @default(true)
+  autoRebookingNudgeDays  Int     @default(0)        // 0 = disabled
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// ────────────────────────────────────────────────
+// STAFF MEMBERS
+// ────────────────────────────────────────────────
+model StaffMember {
+  id           String   @id @default(cuid())
+  businessId   String
+  name         String
+  email        String?
+  phone        String?
+  role         String   @default("staff")  // owner | manager | staff
+  avatarColor  String   @default("#6366f1")
+  active       Boolean  @default(true)
+  firebaseUid  String?  // if staff member has their own login
+  // Working hours: JSON like {"mon":{"start":"09:00","end":"17:00"},"tue":...}
+  workingHours Json?
+  // Breaks: JSON like [{"start":"12:00","end":"13:00"}]
+  breaks       Json?
+  // Time off: JSON like [{"date":"2026-05-01","reason":"Holiday"}]
+  timeOff      Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookings  Booking[]
+  services  ServiceStaff[]
+
+  @@unique([businessId, email])
+  @@index([businessId])
+  @@index([firebaseUid])
+}
+
+// ────────────────────────────────────────────────
+// SERVICES (treatments/offerings)
 // ────────────────────────────────────────────────
 model Service {
   id          String   @id @default(cuid())
@@ -53,64 +116,97 @@ model Service {
   name        String
   category    String
   durationMin Int      @default(30)
-  price       Float
+  priceCents  Int      @default(0)   // price in cents (e.g. 2500 = $25.00)
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
 
-  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
   bookings Booking[]
+  staff    ServiceStaff[]
 
   @@index([businessId])
+}
+
+// Junction: which staff can perform which services
+model ServiceStaff {
+  id           String      @id @default(cuid())
+  serviceId    String
+  staffMemberId String
+
+  service      Service     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  staffMember  StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, staffMemberId])
 }
 
 // ────────────────────────────────────────────────
 // CUSTOMERS
 // ────────────────────────────────────────────────
 model Customer {
-  id          String    @id @default(cuid())
-  businessId  String
-  name        String
-  phone       String
-  email       String?
-  avatarColor String    @default("#6366f1")
-  totalSpent  Float     @default(0)
-  totalVisits Int       @default(0)
-  lastVisit   DateTime?
-  status      String    @default("active")  // active | inactive
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  businessId       String
+  name             String
+  phone            String
+  email            String?
+  avatarColor      String    @default("#6366f1")
+  totalSpentCents  Int       @default(0)
+  totalVisits      Int       @default(0)
+  lastVisit        DateTime?
+  notes            String?
+  preferredStaffId String?
+  marketingConsent Boolean   @default(false)
+  status           String    @default("active")  // active | inactive
+  deletedAt        DateTime? // soft delete
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  bookings      Booking[]
-  conversations Conversation[]
+  business       Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookings       Booking[]
+  conversations  Conversation[]
+  consentLogs    ConsentLog[]
+  reviewRequests ReviewRequest[]
 
   @@unique([businessId, phone])
   @@index([businessId])
+  @@index([deletedAt])
 }
 
 // ────────────────────────────────────────────────
 // BOOKINGS
 // ────────────────────────────────────────────────
 model Booking {
-  id         String   @id @default(cuid())
-  businessId String
-  customerId String?
-  serviceId  String?
-  date       String   // "YYYY-MM-DD"
-  time       String   // "HH:MM AM/PM"
-  status     String   @default("pending")  // pending | confirmed | completed | cancelled
-  amount     Float
-  notes      String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id              String    @id @default(cuid())
+  businessId      String
+  customerId      String?
+  serviceId       String?
+  staffMemberId   String?
+  startTime       DateTime  // UTC start of appointment
+  endTime         DateTime  // UTC end of appointment
+  status          String    @default("pending")  // pending | confirmed | completed | cancelled | no_show
+  amountCents     Int       @default(0)
+  depositCents    Int       @default(0)
+  paymentStatus   String    @default("unpaid")   // unpaid | deposit_paid | paid | refunded
+  notes           String?
+  cancelToken     String?   @unique  // for public cancel link
+  rescheduleToken String?   @unique  // for public reschedule link
+  source          String    @default("manual")  // manual | online | walk_in
+  deletedAt       DateTime? // soft delete
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer Customer? @relation(fields: [customerId], references: [id])
-  service  Service?  @relation(fields: [serviceId], references: [id])
+  business      Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer      Customer?     @relation(fields: [customerId], references: [id])
+  service       Service?      @relation(fields: [serviceId], references: [id])
+  staffMember   StaffMember?  @relation(fields: [staffMemberId], references: [id])
+  reviewRequest ReviewRequest?
 
   @@index([businessId])
-  @@index([businessId, date])
+  @@index([businessId, startTime])
   @@index([customerId])
+  @@index([staffMemberId, startTime])
+  @@index([cancelToken])
+  @@index([rescheduleToken])
+  @@index([deletedAt])
 }
 
 // ────────────────────────────────────────────────
@@ -122,7 +218,7 @@ model Walkin {
   customerName String
   phone        String
   service      String
-  amount       Float
+  amountCents  Int      @default(0)
   createdAt    DateTime @default(now())
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -168,7 +264,7 @@ model Message {
 }
 
 // ────────────────────────────────────────────────
-// AUTOMATIONS
+// AUTOMATIONS (user-defined rules)
 // ────────────────────────────────────────────────
 model Automation {
   id         String   @id @default(cuid())
@@ -187,15 +283,97 @@ model Automation {
 }
 
 // ────────────────────────────────────────────────
-// ANALYTICS (daily aggregated — for dashboard chart)
+// SCHEDULED TASKS (replaces BullMQ — processed by node-cron)
+// ────────────────────────────────────────────────
+model ScheduledTask {
+  id         String   @id @default(cuid())
+  businessId String
+  type       String   // reminder_24h | reminder_2h | review_request | rebooking_nudge | follow_up | auto_reply
+  status     String   @default("pending")  // pending | processing | completed | failed
+  executeAt  DateTime // when to execute
+  payload    Json     // { bookingId, customerId, channel, etc }
+  result     String?  // success/error message
+  attempts   Int      @default(0)
+  maxAttempts Int     @default(3)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([status, executeAt])
+  @@index([businessId])
+}
+
+// ────────────────────────────────────────────────
+// REVIEW REQUESTS
+// ────────────────────────────────────────────────
+model ReviewRequest {
+  id         String   @id @default(cuid())
+  bookingId  String   @unique
+  customerId String
+  businessId String
+  channel    String   @default("email")  // email | whatsapp | sms
+  status     String   @default("pending") // pending | sent | clicked | reviewed
+  sentAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  booking  Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([businessId])
+}
+
+// ────────────────────────────────────────────────
+// CONSENT LOGS (GDPR / privacy compliance)
+// ────────────────────────────────────────────────
+model ConsentLog {
+  id          String   @id @default(cuid())
+  customerId  String
+  consentType String   // marketing_email | marketing_sms | marketing_whatsapp | data_processing
+  granted     Boolean
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+// ────────────────────────────────────────────────
+// AUDIT LOGS (privacy & security actions)
+// ────────────────────────────────────────────────
+model AuditLog {
+  id         String   @id @default(cuid())
+  businessId String
+  actorId    String?  // staffMemberId or system
+  action     String   // customer_data_exported | customer_anonymized | consent_changed | login | settings_changed
+  entity     String?  // customer | booking | staff | settings
+  entityId   String?
+  meta       Json?    // extra context
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ────────────────────────────────────────────────
+// ANALYTICS (daily aggregated — for dashboard charts)
 // ────────────────────────────────────────────────
 model AnalyticsDaily {
-  id           String   @id @default(cuid())
-  businessId   String
-  date         String   // "YYYY-MM-DD"
-  revenue      Float    @default(0)
-  bookingCount Int      @default(0)
-  walkinCount  Int      @default(0)
+  id            String   @id @default(cuid())
+  businessId    String
+  date          String   // "YYYY-MM-DD"
+  revenueCents  Int      @default(0)
+  bookingCount  Int      @default(0)
+  walkinCount   Int      @default(0)
+  noShowCount   Int      @default(0)
+  cancelCount   Int      @default(0)
+  newCustomers  Int      @default(0)
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -212,15 +390,15 @@ model Channel {
   platform      String   // "whatsapp" | "instagram"
   active        Boolean  @default(true)
   // WhatsApp fields
-  phoneNumberId String?  // META_PHONE_NUMBER_ID
-  accessToken   String?  // META_ACCESS_TOKEN
-  verifyToken   String?  // Webhook verify token
-  waPhoneNumber String?  // Display phone number
+  phoneNumberId String?
+  accessToken   String?
+  verifyToken   String?
+  waPhoneNumber String?
   // Instagram fields
   igUserId      String?
   igAccessToken String?
   appSecret     String?
-  igUsername    String?  // Display username
+  igUsername     String?
   connectedAt   DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

@@ -1,9 +1,11 @@
-// server/routes/walkins.js
+// server/routes/walkins.js — Walk-in Entry (upgraded for int cents schema)
 const express = require('express');
 const router = express.Router();
 const prisma = require('../services/db');
 const firebaseAuth = require('../middleware/firebaseAuth');
-const { scheduleWalkinThanks } = require('../queues/automationQueue');
+const { scheduleTask } = require('../services/scheduler');
+const { sendTextMessage } = require('../services/whatsapp');
+const llm = require('../services/llm');
 
 async function getBusiness(firebaseUid) {
   return prisma.business.findUniqueOrThrow({ where: { firebaseUid } });
@@ -24,7 +26,12 @@ router.get('/', firebaseAuth, async (req, res) => {
       where,
       orderBy: { createdAt: 'desc' },
     });
-    res.json({ walkins });
+    // Return amount in dollars for frontend compatibility
+    const formatted = walkins.map(w => ({
+      ...w,
+      amount: w.amountCents / 100,
+    }));
+    res.json({ walkins: formatted });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -35,16 +42,18 @@ router.post('/', firebaseAuth, async (req, res) => {
   try {
     const business = await getBusiness(req.firebaseUid);
     const { customerName, phone, service, amount } = req.body;
-    if (!customerName || !service || !amount) {
-      return res.status(400).json({ error: 'customerName, service, amount are required' });
+    if (!customerName || !service) {
+      return res.status(400).json({ error: 'customerName and service are required' });
     }
+
+    const amountCents = Math.round(Number(amount || 0) * 100);
 
     const walkin = await prisma.walkin.create({
       data: {
         businessId: business.id,
         customerName, phone: phone || '',
         service,
-        amount: Number(amount),
+        amountCents,
       },
     });
 
@@ -52,13 +61,24 @@ router.post('/', firebaseAuth, async (req, res) => {
     const today = new Date().toISOString().split('T')[0];
     await prisma.analyticsDaily.upsert({
       where: { businessId_date: { businessId: business.id, date: today } },
-      update: { revenue: { increment: Number(amount) }, walkinCount: { increment: 1 } },
-      create: { businessId: business.id, date: today, revenue: Number(amount), walkinCount: 1 },
+      update: { revenueCents: { increment: amountCents }, walkinCount: { increment: 1 } },
+      create: { businessId: business.id, date: today, revenueCents: amountCents, walkinCount: 1 },
     });
 
-    // Schedule thank-you WhatsApp (non-blocking)
+    // Send thank-you via WhatsApp (LLM-generated, non-blocking)
     if (phone) {
-      scheduleWalkinThanks({ ...walkin, customerName, phone }).catch(console.error);
+      (async () => {
+        try {
+          const msg = await llm.generateMessage('review_request', {
+            customerName,
+            service,
+            businessName: business.name,
+          });
+          await sendTextMessage(phone.replace(/\D/g, ''), msg);
+        } catch (err) {
+          console.error('[Walkin] Thank-you send error:', err.message);
+        }
+      })();
     }
 
     // Upsert customer record
@@ -66,16 +86,16 @@ router.post('/', firebaseAuth, async (req, res) => {
       const colors = ['#6366f1','#10b981','#f59e0b','#a855f7','#ef4444','#06b6d4','#ec4899'];
       await prisma.customer.upsert({
         where: { businessId_phone: { businessId: business.id, phone } },
-        update: { totalSpent: { increment: Number(amount) }, totalVisits: { increment: 1 }, lastVisit: new Date() },
+        update: { totalSpentCents: { increment: amountCents }, totalVisits: { increment: 1 }, lastVisit: new Date() },
         create: {
           businessId: business.id, name: customerName, phone,
           avatarColor: colors[Math.floor(Math.random() * colors.length)],
-          totalSpent: Number(amount), totalVisits: 1, lastVisit: new Date(),
+          totalSpentCents: amountCents, totalVisits: 1, lastVisit: new Date(),
         },
       });
     }
 
-    res.status(201).json({ walkin });
+    res.status(201).json({ walkin: { ...walkin, amount: amountCents / 100 } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,33 +1,44 @@
 import { Link } from 'react-router-dom';
 import {
   Sparkles, MessageSquare, Calendar, Zap, Users, BarChart3,
-  Check, ArrowRight, Star, Shield, Globe
+  Check, ArrowRight, Star, Shield, Globe, Clock, CreditCard, Bot
 } from 'lucide-react';
 
 const features = [
-  { icon: '💬', title: 'Smart Inbox', desc: 'Manage WhatsApp & Instagram messages in one unified inbox with AI-powered suggestions.', color: '#6366f1' },
-  { icon: '📅', title: 'Online Bookings', desc: 'Let customers book appointments 24/7 with instant confirmation and payment collection.', color: '#10b981' },
-  { icon: '⚡', title: 'Automation', desc: 'Auto-reply, follow-ups, reminders — set it once and watch your business run itself.', color: '#f59e0b' },
-  { icon: '👥', title: 'Customer CRM', desc: 'Track every customer\'s history, spending, and preferences for personalized service.', color: '#a855f7' },
-  { icon: '📊', title: 'Revenue Analytics', desc: 'Real-time dashboards to track daily revenue, bookings, and business performance.', color: '#06b6d4' },
-  { icon: '🚶', title: 'Walk-in Manager', desc: 'Log walk-in customers instantly and send automatic thank-you messages.', color: '#ec4899' },
+  { icon: '📅', title: 'Online Booking', desc: 'Let clients book appointments 24/7 with instant confirmation and smart scheduling.', color: '#6366f1' },
+  { icon: '👥', title: 'Client CRM', desc: 'Track every client\'s history, spending, preferences, and notes for personalized service.', color: '#10b981' },
+  { icon: '🤖', title: 'AI Automation', desc: 'Smart reminders, follow-ups, and review requests — powered by AI, not templates.', color: '#f59e0b' },
+  { icon: '📊', title: 'Business Analytics', desc: 'Real-time dashboards to track revenue, team performance, and growth metrics.', color: '#a855f7' },
+  { icon: '💬', title: 'Unified Inbox', desc: 'Manage WhatsApp & Instagram messages in one place with AI-powered replies.', color: '#06b6d4' },
+  { icon: '👔', title: 'Team Management', desc: 'Staff schedules, working hours, breaks, and time off — all in one place.', color: '#ec4899' },
+];
+
+const verticals = [
+  { emoji: '💇', label: 'Salons & Barbershops' },
+  { emoji: '💅', label: 'Nail Studios' },
+  { emoji: '🧖', label: 'Spas & Wellness' },
+  { emoji: '💪', label: 'Fitness & Personal Training' },
+  { emoji: '🏥', label: 'Clinics & Health' },
+  { emoji: '📸', label: 'Photography Studios' },
+  { emoji: '🎓', label: 'Tutoring & Coaching' },
+  { emoji: '🐾', label: 'Pet Services' },
 ];
 
 const plans = [
   {
-    name: 'Starter', price: '₹999', period: '/month',
-    features: ['Up to 50 bookings/month', '1 staff member', 'WhatsApp integration', 'Basic automation', 'Customer CRM'],
+    name: 'Starter', price: '$29', period: '/month',
+    features: ['Up to 50 bookings/month', '1 team member', 'WhatsApp integration', 'AI-powered reminders', 'Client CRM'],
     cta: 'Start Free Trial',
   },
   {
-    name: 'Pro', price: '₹2,499', period: '/month',
-    features: ['Unlimited bookings', '5 staff members', 'WhatsApp + Instagram', 'Advanced automation', 'Customer CRM', 'Revenue analytics', 'Priority support'],
+    name: 'Pro', price: '$79', period: '/month',
+    features: ['Unlimited bookings', '5 team members', 'WhatsApp + Instagram', 'AI automation suite', 'Advanced CRM', 'Revenue analytics', 'Priority support'],
     cta: 'Get Started',
     featured: true,
   },
   {
-    name: 'Business', price: '₹5,999', period: '/month',
-    features: ['Unlimited everything', '20 staff members', 'All integrations', 'Custom automation', 'Advanced CRM', 'White-label booking page', 'Dedicated support', 'API access'],
+    name: 'Business', price: '$149', period: '/month',
+    features: ['Unlimited everything', '20 team members', 'All integrations', 'Custom AI automations', 'Advanced CRM', 'White-label booking', 'Dedicated support', 'API access'],
     cta: 'Contact Sales',
   },
 ];
@@ -51,15 +62,15 @@ export default function Landing() {
       <div className="hero" style={{ paddingTop: 100, paddingBottom: 80 }}>
         <div className="hero-glow" />
         <div className="hero-badge">
-          <Star size={12} fill="currentColor" /> Trusted by 2,000+ businesses across India
+          <Star size={12} fill="currentColor" /> Trusted by thousands of businesses worldwide
         </div>
         <h1>
-          Run Your Salon on{' '}
+          Run Your Business on{' '}
           <span className="hero-gradient-text">Autopilot</span>
         </h1>
         <p>
-          AutoBiz Pro handles your bookings, messages, payments, and follow-ups automatically —
-          so you can focus on what you do best.
+          The all-in-one platform for bookings, client management, and AI-powered automation —
+          so you can focus on delivering great service.
         </p>
         <div className="hero-cta">
           <Link to="/register" className="btn btn-primary btn-lg">
@@ -72,12 +83,30 @@ export default function Landing() {
         <div style={{ marginTop: 48, display: 'flex', gap: 32, justifyContent: 'center', flexWrap: 'wrap' }}>
           {[
             { icon: Shield, label: 'No credit card required' },
-            { icon: Globe, label: 'WhatsApp & Instagram' },
+            { icon: Bot, label: 'AI-powered automation' },
             { icon: BarChart3, label: 'Real-time analytics' },
           ].map(({ icon: Icon, label }) => (
             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
               <Icon size={15} style={{ color: 'var(--color-primary-light)' }} />
               {label}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Verticals */}
+      <div style={{ textAlign: 'center', padding: '48px 24px', borderTop: '1px solid var(--color-border)' }}>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 20 }}>
+          Built for every appointment-based business
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', maxWidth: 700, margin: '0 auto' }}>
+          {verticals.map(v => (
+            <div key={v.label} style={{
+              padding: '8px 18px', borderRadius: 'var(--radius-full)', background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)', fontSize: '0.85rem', fontWeight: 500,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <span>{v.emoji}</span> {v.label}
             </div>
           ))}
         </div>
@@ -89,7 +118,7 @@ export default function Landing() {
           <div className="section-tag">Everything You Need</div>
           <h2 style={{ fontSize: '2rem' }}>One Platform, Infinite Possibilities</h2>
           <p style={{ marginTop: 12, maxWidth: 500, margin: '12px auto 0' }}>
-            From booking to billing, messaging to management — AutoBiz Pro does it all.
+            From booking to billing, messaging to management — run your entire business from one dashboard.
           </p>
         </div>
         <div className="features-grid">
@@ -139,8 +168,8 @@ export default function Landing() {
 
       {/* Footer CTA */}
       <div style={{ textAlign: 'center', padding: '80px 48px', borderTop: '1px solid var(--color-border)' }}>
-        <h2 style={{ fontSize: '2rem', marginBottom: 12 }}>Ready to Transform Your Business?</h2>
-        <p style={{ marginBottom: 28 }}>Join thousands of businesses already running on AutoBiz Pro.</p>
+        <h2 style={{ fontSize: '2rem', marginBottom: 12 }}>Ready to Grow Your Business?</h2>
+        <p style={{ marginBottom: 28 }}>Join thousands of businesses already running smarter with AutoBiz Pro.</p>
         <Link to="/register" className="btn btn-primary btn-lg">
           Start Your Free Trial <ArrowRight size={18} />
         </Link>
@@ -152,7 +181,11 @@ export default function Landing() {
           <div className="logo-icon" style={{ width: 28, height: 28 }}><Sparkles size={14} color="#fff" /></div>
           <span>AutoBiz Pro</span>
         </div>
-        <span>© 2026 AutoBiz Pro. All rights reserved.</span>
+        <div style={{ display: 'flex', gap: 20 }}>
+          <Link to="/privacy" style={{ color: 'var(--text-muted)' }}>Privacy Policy</Link>
+          <Link to="/terms" style={{ color: 'var(--text-muted)' }}>Terms of Service</Link>
+        </div>
+        <span>© {new Date().getFullYear()} AutoBiz Pro. All rights reserved.</span>
       </div>
     </div>
   );

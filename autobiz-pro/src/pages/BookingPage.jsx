@@ -1,78 +1,119 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Calendar, Clock, User, Phone, Mail, Check, Sparkles, ArrowLeft, ArrowRight } from 'lucide-react';
-import { useToast } from '../context/ToastContext';
+import {
+  Sparkles, MapPin, Phone, Calendar, Clock, Check,
+  ChevronLeft, ChevronRight, User, ArrowRight
+} from 'lucide-react';
 import api from '../api/client';
 
+const STEP_LABELS = ['Service', 'Team', 'Date & Time', 'Your Details', 'Confirm'];
+
 export default function BookingPage() {
-  const { businessSlug: slug } = useParams();
-  const { toast } = useToast();
+  const { businessSlug } = useParams();
   const [business, setBusiness] = useState(null);
-  const [services, setServices] = useState([]);
-  const [step, setStep] = useState(1); // 1=service, 2=datetime, 3=details, 4=confirm
   const [loading, setLoading] = useState(true);
+  const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [bookingResult, setBookingResult] = useState(null);
-  const [form, setForm] = useState({ serviceId: '', date: '', time: '', name: '', phone: '', email: '' });
 
-  const upd = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  const selectedService = services.find(s => s.id === form.serviceId);
+  const [selectedService, setSelectedService] = useState(null);
+  const [selectedStaff, setSelectedStaff] = useState(null);
+  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedTime, setSelectedTime] = useState('');
+  const [availableSlots, setAvailableSlots] = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [form, setForm] = useState({ name: '', phone: '', email: '', marketingConsent: false });
 
   useEffect(() => {
     loadBusiness();
-  }, [slug]);
+  }, [businessSlug]);
 
   const loadBusiness = async () => {
+    setLoading(true);
     try {
-      const { data } = await api.get(`/api/public/business/${slug}`);
+      const { data } = await api.get(`/api/public/business/${businessSlug}`);
       setBusiness(data.business);
-      setServices(data.business.services || []);
     } catch (err) {
-      console.error('Load business error:', err);
+      console.error('Failed to load business:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async () => {
-    if (!form.name || !form.phone || !form.date || !form.time) {
-      toast('Please fill all required fields', 'error');
-      return;
+  const loadAvailability = async (date, staffId) => {
+    setSlotsLoading(true);
+    try {
+      const params = new URLSearchParams({ date, businessSlug });
+      if (staffId) params.append('staffId', staffId);
+      const { data } = await api.get(`/api/public/availability?${params}`);
+      setAvailableSlots(data.slots || []);
+    } catch (err) {
+      console.error('Failed to load availability:', err);
+      setAvailableSlots([]);
+    } finally {
+      setSlotsLoading(false);
     }
+  };
+
+  const handleDateChange = (date) => {
+    setSelectedDate(date);
+    setSelectedTime('');
+    loadAvailability(date, selectedStaff?.id);
+  };
+
+  const handleSubmit = async () => {
+    if (!form.name || !form.phone) return;
     setSubmitting(true);
     try {
       const { data } = await api.post('/api/public/bookings', {
-        businessSlug: slug,
+        businessSlug,
         customerName: form.name,
         phone: form.phone,
         email: form.email || undefined,
-        serviceId: form.serviceId || undefined,
-        date: form.date,
-        time: form.time,
+        serviceId: selectedService?.id,
+        staffMemberId: selectedStaff?.id || undefined,
+        date: selectedDate,
+        time: selectedTime,
+        marketingConsent: form.marketingConsent,
       });
-      setBookingResult(data.booking);
-      setStep(4);
-      toast('Booking confirmed! 🎉', 'success');
+      setBookingResult(data);
     } catch (err) {
-      toast(err.message || 'Failed to submit booking', 'error');
+      alert(err.message || 'Failed to create booking. Please try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Group services by category
-  const grouped = services.reduce((acc, s) => {
-    const cat = s.category || 'General';
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(s);
-    return acc;
-  }, {});
+  const settings = business?.settings || {};
+  const currency = settings.currencySymbol || '$';
+  const brandColor = settings.brandColor || '#6366f1';
 
-  // Generate available time slots
-  const timeSlots = [];
-  for (let h = 9; h <= 20; h++) {
-    ['00', '30'].forEach(m => timeSlots.push(`${String(h).padStart(2, '0')}:${m}`));
+  const formatPrice = (cents) => `${currency}${(cents / 100).toFixed(2)}`;
+
+  // Generate available dates (next N days)
+  const bookingWindow = settings.bookingWindowDays || 30;
+  const dates = [];
+  for (let i = 0; i < Math.min(bookingWindow, 14); i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    dates.push({
+      value: d.toISOString().split('T')[0],
+      day: d.toLocaleDateString('en-US', { weekday: 'short' }),
+      date: d.getDate(),
+      month: d.toLocaleDateString('en-US', { month: 'short' }),
+      isToday: i === 0,
+    });
   }
+
+  // Get staff who can perform the selected service
+  const availableStaff = selectedService?.staff?.map(s => s.staffMember) || business?.staff || [];
+
+  const formatTime = (timeStr) => {
+    const [h, m] = timeStr.split(':').map(Number);
+    if (settings.clockFormat === '24h') return timeStr;
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+  };
 
   if (loading) {
     return (
@@ -84,205 +125,291 @@ export default function BookingPage() {
 
   if (!business) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg)' }}>
-        <div className="card" style={{ maxWidth: 400, textAlign: 'center' }}>
-          <h2>Business Not Found</h2>
-          <p style={{ color: 'var(--text-secondary)', marginTop: 8 }}>The booking page for "{slug}" doesn't exist.</p>
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg)', gap: 16 }}>
+        <h2>Business not found</h2>
+        <p style={{ color: 'var(--text-secondary)' }}>The booking page you're looking for doesn't exist.</p>
+      </div>
+    );
+  }
+
+  // Booking confirmed
+  if (bookingResult) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg)', padding: 24 }}>
+        <div className="card" style={{ maxWidth: 480, textAlign: 'center', padding: '48px 32px' }}>
+          <div style={{ width: 64, height: 64, borderRadius: '50%', background: `${brandColor}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+            <Check size={32} style={{ color: brandColor }} />
+          </div>
+          <h2 style={{ marginBottom: 8 }}>Booking Confirmed! 🎉</h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>
+            Your appointment has been confirmed. You'll receive a confirmation message shortly.
+          </p>
+          <div style={{ background: 'var(--color-surface-2)', borderRadius: 'var(--radius-md)', padding: '16px 20px', textAlign: 'left', fontSize: '0.9rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Service</span>
+              <span style={{ fontWeight: 600 }}>{bookingResult.booking?.service || 'Appointment'}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Date</span>
+              <span style={{ fontWeight: 600 }}>{bookingResult.booking?.date}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Time</span>
+              <span style={{ fontWeight: 600 }}>{bookingResult.booking?.time}</span>
+            </div>
+            {bookingResult.booking?.amountCents > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Amount</span>
+                <span style={{ fontWeight: 600 }}>{formatPrice(bookingResult.booking.amountCents)}</span>
+              </div>
+            )}
+          </div>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 20 }}>
+            Thank you for choosing {business.name}!
+          </p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div style={{ minHeight: '100vh', background: 'var(--color-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div style={{ width: '100%', maxWidth: 580 }}>
-        {/* Header */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            {business.logoUrl ? (
-              <img src={business.logoUrl} alt="" style={{ width: 48, height: 48, borderRadius: 'var(--radius-lg)' }} />
-            ) : (
-              <div style={{ width: 48, height: 48, borderRadius: 'var(--radius-lg)', background: 'var(--gradient-primary)', display: 'grid', placeItems: 'center' }}>
-                <Sparkles size={22} color="#fff" />
-              </div>
-            )}
-            <div style={{ textAlign: 'left' }}>
-              <h1 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0 }}>{business.name}</h1>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{business.category}</div>
-            </div>
-          </div>
-          {business.address && <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: 4 }}>📍 {business.address}</p>}
-        </div>
+  // Group services by category
+  const servicesByCategory = {};
+  (business.services || []).forEach(s => {
+    const cat = s.category || 'General';
+    if (!servicesByCategory[cat]) servicesByCategory[cat] = [];
+    servicesByCategory[cat].push(s);
+  });
 
-        {/* Progress Steps */}
-        {step < 4 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 28, justifyContent: 'center' }}>
-            {['Service', 'Date & Time', 'Details'].map((s, i) => {
-              const stepNum = i + 1;
-              const isActive = step === stepNum;
-              const isDone = step > stepNum;
-              return (
-                <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <div style={{
-                    width: 28, height: 28, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: '0.75rem', fontWeight: 700,
-                    background: isDone ? 'var(--color-success)' : isActive ? 'var(--color-primary)' : 'var(--color-surface-2)',
-                    color: isDone || isActive ? '#fff' : 'var(--text-secondary)',
-                  }}>
-                    {isDone ? <Check size={14} /> : stepNum}
-                  </div>
-                  <span style={{ fontSize: '0.75rem', fontWeight: isActive ? 700 : 400, color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)', marginRight: 10 }}>{s}</span>
-                  {i < 2 && <div style={{ width: 40, height: 2, background: isDone ? 'var(--color-success)' : 'var(--color-border)', marginRight: 10, borderRadius: 2 }} />}
-                </div>
-              );
-            })}
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--color-bg)', paddingBottom: 48 }}>
+      {/* Header */}
+      <div style={{ padding: '32px 24px 24px', textAlign: 'center', borderBottom: '1px solid var(--color-border)' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          {business.logoUrl ? (
+            <img src={business.logoUrl} alt="" style={{ width: 40, height: 40, borderRadius: 10 }} />
+          ) : (
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: `${brandColor}20`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Sparkles size={20} style={{ color: brandColor }} />
+            </div>
+          )}
+          <h1 style={{ fontSize: '1.4rem' }}>{business.name}</h1>
+        </div>
+        {business.address && (
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'center' }}>
+            <MapPin size={13} /> {business.address}
           </div>
         )}
 
-        <div className="card" style={{ padding: 28 }}>
-          {/* Step 1: Service Selection */}
-          {step === 1 && (
-            <>
-              <h2 style={{ marginBottom: 20, fontSize: '1.1rem' }}>Choose a Service</h2>
-              {Object.entries(grouped).map(([category, svcs]) => (
-                <div key={category} style={{ marginBottom: 20 }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>{category}</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {svcs.map(s => (
-                      <label key={s.id} style={{
-                        display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderRadius: 'var(--radius-md)',
-                        border: `2px solid ${form.serviceId === s.id ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                        background: form.serviceId === s.id ? 'var(--color-primary-glow)' : 'transparent', cursor: 'pointer', transition: 'all 0.15s',
-                      }}>
-                        <input type="radio" name="service" value={s.id} checked={form.serviceId === s.id} onChange={() => upd('serviceId', s.id)} style={{ display: 'none' }} />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{s.name}</div>
-                          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 2 }}>⏱ {s.durationMin} min</div>
+        {/* Step Indicator */}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 24 }}>
+          {STEP_LABELS.map((label, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: '50%', fontSize: '0.75rem', fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: i <= step ? brandColor : 'var(--color-surface-2)',
+                color: i <= step ? '#fff' : 'var(--text-muted)',
+                transition: 'all 0.3s ease',
+              }}>
+                {i < step ? <Check size={14} /> : i + 1}
+              </div>
+              {i < STEP_LABELS.length - 1 && (
+                <div style={{ width: 24, height: 2, background: i < step ? brandColor : 'var(--color-border)', transition: 'background 0.3s ease' }} />
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 8 }}>{STEP_LABELS[step]}</div>
+      </div>
+
+      {/* Content */}
+      <div style={{ maxWidth: 560, margin: '0 auto', padding: '24px 20px' }}>
+
+        {/* Step 0: Service */}
+        {step === 0 && (
+          <div>
+            <h3 style={{ marginBottom: 16 }}>Choose a Service</h3>
+            {Object.entries(servicesByCategory).map(([cat, svcs]) => (
+              <div key={cat} style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>{cat}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {svcs.map(s => (
+                    <button key={s.id} onClick={() => { setSelectedService(s); setStep(1); }} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px',
+                      background: selectedService?.id === s.id ? `${brandColor}15` : 'var(--color-surface)',
+                      border: `1px solid ${selectedService?.id === s.id ? brandColor : 'var(--color-border)'}`,
+                      borderRadius: 'var(--radius-md)', cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'all 0.2s ease',
+                    }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>{s.name}</div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                          <Clock size={12} style={{ display: 'inline', verticalAlign: -1 }} /> {s.durationMin} min
                         </div>
-                        <div style={{ fontWeight: 700, color: 'var(--color-primary-light)' }}>₹{s.price}</div>
-                      </label>
+                      </div>
+                      <div style={{ fontWeight: 700, color: brandColor, fontSize: '1rem' }}>{formatPrice(s.priceCents)}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Step 1: Staff */}
+        {step === 1 && (
+          <div>
+            <h3 style={{ marginBottom: 16 }}>Choose a Team Member</h3>
+            <button onClick={() => { setSelectedStaff(null); setStep(2); }} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', width: '100%',
+              background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-md)', cursor: 'pointer', marginBottom: 8, transition: 'all 0.2s ease',
+            }}>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--color-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <User size={18} style={{ color: 'var(--text-muted)' }} />
+              </div>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>No Preference</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Any available team member</div>
+              </div>
+            </button>
+            {availableStaff.map(s => (
+              <button key={s.id} onClick={() => { setSelectedStaff(s); setStep(2); }} style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', width: '100%',
+                background: selectedStaff?.id === s.id ? `${brandColor}15` : 'var(--color-surface)',
+                border: `1px solid ${selectedStaff?.id === s.id ? brandColor : 'var(--color-border)'}`,
+                borderRadius: 'var(--radius-md)', cursor: 'pointer', marginBottom: 8, transition: 'all 0.2s ease',
+              }}>
+                <div style={{
+                  width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: (s.avatarColor || brandColor) + '20', color: s.avatarColor || brandColor, fontWeight: 700, fontSize: '0.85rem',
+                }}>
+                  {s.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                </div>
+                <div style={{ textAlign: 'left' }}>
+                  <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.name}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Step 2: Date & Time */}
+        {step === 2 && (
+          <div>
+            <h3 style={{ marginBottom: 16 }}>Pick a Date & Time</h3>
+            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 12, marginBottom: 20 }}>
+              {dates.map(d => (
+                <button key={d.value} onClick={() => handleDateChange(d.value)} style={{
+                  minWidth: 68, padding: '12px 8px', borderRadius: 'var(--radius-md)', textAlign: 'center',
+                  background: selectedDate === d.value ? brandColor : 'var(--color-surface)',
+                  border: `1px solid ${selectedDate === d.value ? brandColor : 'var(--color-border)'}`,
+                  color: selectedDate === d.value ? '#fff' : 'var(--text-primary)',
+                  cursor: 'pointer', transition: 'all 0.2s ease', flexShrink: 0,
+                }}>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 600, opacity: 0.7 }}>{d.day}</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 700 }}>{d.date}</div>
+                  <div style={{ fontSize: '0.65rem', fontWeight: 600 }}>{d.month}</div>
+                </button>
+              ))}
+            </div>
+
+            {selectedDate && (
+              <div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 12, color: 'var(--text-secondary)' }}>Available Times</div>
+                {slotsLoading ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><div className="spinner" style={{ width: 24, height: 24 }} /></div>
+                ) : availableSlots.filter(s => s.available).length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)', fontSize: '0.9rem' }}>No available slots on this date</div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: 8 }}>
+                    {availableSlots.filter(s => s.available).map(s => (
+                      <button key={s.time} onClick={() => { setSelectedTime(s.time); setStep(3); }} style={{
+                        padding: '10px 8px', borderRadius: 'var(--radius-md)', textAlign: 'center', fontSize: '0.85rem', fontWeight: 600,
+                        background: selectedTime === s.time ? brandColor : 'var(--color-surface)',
+                        border: `1px solid ${selectedTime === s.time ? brandColor : 'var(--color-border)'}`,
+                        color: selectedTime === s.time ? '#fff' : 'var(--text-primary)',
+                        cursor: 'pointer', transition: 'all 0.2s ease',
+                      }}>
+                        {formatTime(s.time)}
+                      </button>
                     ))}
                   </div>
-                </div>
-              ))}
-              {services.length === 0 && <div style={{ color: 'var(--text-secondary)', padding: 20, textAlign: 'center' }}>No services available</div>}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
-                <button className="btn btn-primary" onClick={() => setStep(2)}>
-                  Next <ArrowRight size={15} />
-                </button>
+                )}
               </div>
-            </>
-          )}
+            )}
+          </div>
+        )}
 
-          {/* Step 2: Date & Time */}
-          {step === 2 && (
-            <>
-              <h2 style={{ marginBottom: 20, fontSize: '1.1rem' }}>Choose Date & Time</h2>
-              <div className="form-group" style={{ marginBottom: 20 }}>
-                <label className="form-label">Date *</label>
-                <input type="date" className="form-input" value={form.date} min={new Date().toISOString().split('T')[0]} onChange={e => upd('date', e.target.value)} />
+        {/* Step 3: Your Details */}
+        {step === 3 && (
+          <div>
+            <h3 style={{ marginBottom: 16 }}>Your Details</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="form-group">
+                <label className="form-label">Full Name *</label>
+                <input type="text" className="form-input" placeholder="Your name" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
               </div>
               <div className="form-group">
-                <label className="form-label">Time *</label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-                  {timeSlots.map(t => (
-                    <button key={t} onClick={() => upd('time', t)} style={{
-                      padding: '8px', borderRadius: 'var(--radius-md)', border: `1.5px solid ${form.time === t ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                      background: form.time === t ? 'var(--color-primary-glow)' : 'transparent', color: form.time === t ? 'var(--color-primary-light)' : 'var(--text-primary)',
-                      cursor: 'pointer', fontSize: '0.8rem', fontWeight: form.time === t ? 700 : 400, transition: 'all 0.15s',
-                    }}>{t}</button>
-                  ))}
-                </div>
+                <label className="form-label">Phone Number *</label>
+                <input type="tel" className="form-input" placeholder="+1 555 123 4567" value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }}>
-                <button className="btn btn-secondary" onClick={() => setStep(1)}><ArrowLeft size={15} /> Back</button>
-                <button className="btn btn-primary" onClick={() => { if (!form.date || !form.time) { toast('Please select date and time', 'error'); return; } setStep(3); }}>Next <ArrowRight size={15} /></button>
+              <div className="form-group">
+                <label className="form-label">Email (optional)</label>
+                <input type="email" className="form-input" placeholder="you@example.com" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
               </div>
-            </>
-          )}
-
-          {/* Step 3: Contact Details */}
-          {step === 3 && (
-            <>
-              <h2 style={{ marginBottom: 20, fontSize: '1.1rem' }}>Your Details</h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div className="form-group">
-                  <label className="form-label">Full Name *</label>
-                  <div style={{ position: 'relative' }}>
-                    <User size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <input type="text" className="form-input" style={{ paddingLeft: 36 }} placeholder="Your name" value={form.name} onChange={e => upd('name', e.target.value)} required />
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Phone Number *</label>
-                  <div style={{ position: 'relative' }}>
-                    <Phone size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <input type="tel" className="form-input" style={{ paddingLeft: 36 }} placeholder="+91 98765 43210" value={form.phone} onChange={e => upd('phone', e.target.value)} required />
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Email (optional)</label>
-                  <div style={{ position: 'relative' }}>
-                    <Mail size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <input type="email" className="form-input" style={{ paddingLeft: 36 }} placeholder="your@email.com" value={form.email} onChange={e => upd('email', e.target.value)} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Summary */}
-              <div style={{ background: 'var(--color-surface-2)', borderRadius: 'var(--radius-md)', padding: 16, marginTop: 24 }}>
-                <div style={{ fontWeight: 700, marginBottom: 10, fontSize: '0.85rem' }}>Booking Summary</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {[
-                    { icon: Clock, label: selectedService?.name || 'General Appointment' },
-                    { icon: Calendar, label: `${form.date} at ${form.time}` },
-                    selectedService && { icon: null, label: `₹${selectedService.price}` },
-                  ].filter(Boolean).map(({ icon: Icon, label }, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
-                      {Icon && <Icon size={13} style={{ color: 'var(--text-muted)' }} />}
-                      {!Icon && <span style={{ fontWeight: 700, color: 'var(--color-success)' }}>{label}</span>}
-                      {Icon && <span>{label}</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }}>
-                <button className="btn btn-secondary" onClick={() => setStep(2)}><ArrowLeft size={15} /> Back</button>
-                <button className="btn btn-primary" onClick={handleSubmit} disabled={submitting}>
-                  {submitting ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Booking...</> : <><Check size={15} /> Confirm Booking</>}
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* Step 4: Confirmation */}
-          {step === 4 && bookingResult && (
-            <div style={{ textAlign: 'center', padding: 20 }}>
-              <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--color-success-glow)', display: 'grid', placeItems: 'center', margin: '0 auto 20px' }}>
-                <Check size={32} style={{ color: 'var(--color-success)' }} />
-              </div>
-              <h2 style={{ marginBottom: 8 }}>Booking Confirmed!</h2>
-              <p style={{ color: 'var(--text-secondary)', marginBottom: 28, fontSize: '0.9rem' }}>
-                Your appointment at <strong>{business.name}</strong> has been confirmed. You'll receive a WhatsApp confirmation shortly.
-              </p>
-              <div style={{ background: 'var(--color-surface-2)', borderRadius: 'var(--radius-md)', padding: 20, textAlign: 'left' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div><span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>SERVICE</span><div style={{ fontWeight: 600 }}>{bookingResult.service}</div></div>
-                  <div><span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>DATE & TIME</span><div style={{ fontWeight: 600 }}>{bookingResult.date} at {bookingResult.time}</div></div>
-                  {bookingResult.amount > 0 && <div><span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>AMOUNT</span><div style={{ fontWeight: 700, color: 'var(--color-success)' }}>₹{bookingResult.amount}</div></div>}
-                </div>
-              </div>
-              <button className="btn btn-secondary w-full" style={{ marginTop: 24, justifyContent: 'center' }} onClick={() => { setStep(1); setForm({ serviceId: '', date: '', time: '', name: '', phone: '', email: '' }); setBookingResult(null); }}>
-                Book Another Appointment
-              </button>
+              {settings.marketingConsentRequired && (
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                  <input type="checkbox" checked={form.marketingConsent} onChange={e => setForm(p => ({ ...p, marketingConsent: e.target.checked }))}
+                    style={{ marginTop: 2, accentColor: brandColor }} />
+                  I'd like to receive occasional promotions, special offers, and updates from {business.name}. You can unsubscribe at any time.
+                </label>
+              )}
             </div>
-          )}
-        </div>
+            <button className="btn btn-primary w-full" style={{ marginTop: 24, justifyContent: 'center', background: brandColor }}
+              onClick={() => { if (form.name && form.phone) setStep(4); }}>
+              Review Booking <ArrowRight size={16} />
+            </button>
+          </div>
+        )}
 
-        {/* Footer */}
-        <div style={{ textAlign: 'center', marginTop: 24, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          Powered by <span style={{ background: 'var(--gradient-primary)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 700 }}>AutoBiz Pro</span>
-        </div>
+        {/* Step 4: Confirm */}
+        {step === 4 && (
+          <div>
+            <h3 style={{ marginBottom: 16 }}>Review & Confirm</h3>
+            <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '20px', marginBottom: 20 }}>
+              {[
+                { label: 'Service', value: selectedService?.name || 'Appointment' },
+                { label: 'Team Member', value: selectedStaff?.name || 'Any available' },
+                { label: 'Date', value: new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) },
+                { label: 'Time', value: formatTime(selectedTime) },
+                { label: 'Price', value: selectedService ? formatPrice(selectedService.priceCents) : 'Free' },
+                { label: 'Name', value: form.name },
+                { label: 'Phone', value: form.phone },
+              ].map((item, i, arr) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--color-border)' : 'none' }}>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{item.label}</span>
+                  <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.value}</span>
+                </div>
+              ))}
+            </div>
+            <button className="btn btn-primary w-full" style={{ justifyContent: 'center', padding: '14px', fontSize: '1rem', background: brandColor }}
+              onClick={handleSubmit} disabled={submitting}>
+              {submitting ? <><span className="spinner" style={{ width: 16, height: 16 }} /> Confirming...</> : 'Confirm Booking ✓'}
+            </button>
+          </div>
+        )}
+
+        {/* Navigation */}
+        {step > 0 && !bookingResult && (
+          <button className="btn btn-ghost" style={{ marginTop: 16 }} onClick={() => setStep(step - 1)}>
+            <ChevronLeft size={16} /> Back
+          </button>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div style={{ textAlign: 'center', padding: '24px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+        Powered by <a href="/" style={{ color: brandColor, fontWeight: 600 }}>AutoBiz Pro</a>
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Calendar, DollarSign, MessageSquare, Users, TrendingUp, TrendingDown,
-  Plus, UserPlus, Clock, ChevronRight, X
+  Plus, UserPlus, Clock, ChevronRight, X, Repeat, UserX, UsersRound
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import Topbar from '../components/Topbar';
@@ -15,10 +15,11 @@ const statusColors = {
   pending:   { color: 'var(--color-warning)', bg: 'var(--color-warning-glow)' },
   completed: { color: 'var(--color-accent)', bg: 'var(--color-accent-glow)' },
   cancelled: { color: 'var(--color-danger)', bg: 'var(--color-danger-glow)' },
+  no_show:   { color: 'var(--color-danger)', bg: 'var(--color-danger-glow)' },
 };
 
-function AddBookingModal({ onClose, onSave, services }) {
-  const [form, setForm] = useState({ customer: '', phone: '', serviceId: '', time: '', date: '', amount: '' });
+function AddBookingModal({ onClose, onSave, services, staff }) {
+  const [form, setForm] = useState({ customer: '', phone: '', serviceId: '', staffMemberId: '', time: '', date: '', amount: '' });
   const upd = (k, v) => setForm(p => ({ ...p, [k]: v }));
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -28,36 +29,49 @@ function AddBookingModal({ onClose, onSave, services }) {
           <button className="modal-close" onClick={onClose}><X size={16} /></button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="form-group">
-            <label className="form-label">Customer Name</label>
-            <input type="text" className="form-input" placeholder="Priya Mehta" value={form.customer} onChange={e => upd('customer', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Phone</label>
-            <input type="tel" className="form-input" placeholder="+91 98765 43210" value={form.phone} onChange={e => upd('phone', e.target.value)} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label className="form-label">Client Name</label>
+              <input type="text" className="form-input" placeholder="Full name" value={form.customer} onChange={e => upd('customer', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Phone</label>
+              <input type="tel" className="form-input" placeholder="+1..." value={form.phone} onChange={e => upd('phone', e.target.value)} />
+            </div>
           </div>
           <div className="form-group">
             <label className="form-label">Service</label>
             <select className="form-select" value={form.serviceId} onChange={e => {
               const svc = services.find(s => s.id === e.target.value);
               upd('serviceId', e.target.value);
-              if (svc) upd('amount', svc.price.toString());
+              if (svc) upd('amount', ((svc.priceCents || svc.price || 0) / 100).toString());
             }}>
               <option value="">Select service...</option>
-              {services.map(s => <option key={s.id} value={s.id}>{s.name} — ₹{s.price}</option>)}
+              {services.map(s => <option key={s.id} value={s.id}>{s.name} — ${((s.priceCents || s.price || 0) / 100).toFixed(2)}</option>)}
             </select>
           </div>
-          <div className="form-group">
-            <label className="form-label">Date</label>
-            <input type="date" className="form-input" value={form.date} onChange={e => upd('date', e.target.value)} />
+          {staff.length > 0 && (
+            <div className="form-group">
+              <label className="form-label">Team Member</label>
+              <select className="form-select" value={form.staffMemberId} onChange={e => upd('staffMemberId', e.target.value)}>
+                <option value="">Any available</option>
+                {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label className="form-label">Date</label>
+              <input type="date" className="form-input" value={form.date} onChange={e => upd('date', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Time</label>
+              <input type="time" className="form-input" value={form.time} onChange={e => upd('time', e.target.value)} />
+            </div>
           </div>
           <div className="form-group">
-            <label className="form-label">Time</label>
-            <input type="time" className="form-input" value={form.time} onChange={e => upd('time', e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Amount (₹)</label>
-            <input type="number" className="form-input" placeholder="800" value={form.amount} onChange={e => upd('amount', e.target.value)} />
+            <label className="form-label">Amount ($)</label>
+            <input type="number" className="form-input" placeholder="0.00" step="0.01" value={form.amount} onChange={e => upd('amount', e.target.value)} />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
@@ -76,30 +90,31 @@ export default function Dashboard() {
   const [showAddBooking, setShowAddBooking] = useState(false);
   const [todayBookings, setTodayBookings] = useState([]);
   const [revenueData, setRevenueData] = useState([]);
-  const [stats, setStats] = useState({ todayBookings: 0, revenue: 0, pendingPayments: 0, unreadMessages: 0, revenueTrend: 0 });
+  const [stats, setStats] = useState({ todayBookings: 0, revenue: 0, pendingPayments: 0, unreadMessages: 0, revenueTrend: 0, repeatRate: 0, noShowRate: 0, currency: '$' });
   const [services, setServices] = useState([]);
+  const [staffMembers, setStaffMembers] = useState([]);
   const [automations, setAutomations] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
+  useEffect(() => { loadDashboardData(); }, []);
 
   const loadDashboardData = async () => {
     setLoadingData(true);
     try {
       const today = new Date().toISOString().split('T')[0];
-      const [bookingsRes, analyticsRes, todayStatsRes, servicesRes, automationsRes] = await Promise.allSettled([
+      const [bookingsRes, analyticsRes, todayStatsRes, servicesRes, automationsRes, staffRes] = await Promise.allSettled([
         api.get(`/api/bookings?date=${today}`),
         api.get('/api/analytics?days=7'),
         api.get('/api/analytics/today'),
         api.get('/api/services'),
         api.get('/api/automations'),
+        api.get('/api/staff'),
       ]);
 
       if (bookingsRes.status === 'fulfilled') setTodayBookings(bookingsRes.value.data.bookings || []);
       if (servicesRes.status === 'fulfilled') setServices(servicesRes.value.data.services || []);
       if (automationsRes.status === 'fulfilled') setAutomations(automationsRes.value.data.automations || []);
+      if (staffRes.status === 'fulfilled') setStaffMembers(staffRes.value.data.staff || []);
 
       if (todayStatsRes.status === 'fulfilled') {
         setStats(todayStatsRes.value.data);
@@ -109,7 +124,7 @@ export default function Dashboard() {
         const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         const chartData = (analyticsRes.value.data.analytics || []).map(d => ({
           day: days[new Date(d.date).getDay()],
-          revenue: d.revenue,
+          revenue: d.revenue || (d.revenueCents ? d.revenueCents / 100 : 0),
           bookings: d.bookingCount,
         }));
         setRevenueData(chartData.length > 0 ? chartData : [{ day: 'Today', revenue: 0, bookings: 0 }]);
@@ -121,23 +136,23 @@ export default function Dashboard() {
     }
   };
 
-  const pending = todayBookings.filter(b => b.status === 'pending').length;
-  const revenue = todayBookings.filter(b => b.status !== 'cancelled').reduce((a, b) => a + b.amount, 0);
+  const currency = stats.currency || '$';
 
   const dashStats = [
-    { label: "Today's Bookings", value: stats.todayBookings || todayBookings.length, icon: Calendar, gradient: 'var(--gradient-primary)', trend: `${stats.revenueTrend >= 0 ? '+' : ''}${stats.revenueTrend}%`, up: stats.revenueTrend >= 0 },
-    { label: 'Revenue Today', value: `₹${(stats.revenue || revenue).toLocaleString()}`, icon: DollarSign, gradient: 'var(--gradient-success)', trend: `${stats.revenueTrend >= 0 ? '+' : ''}${stats.revenueTrend}%`, up: stats.revenueTrend >= 0 },
-    { label: 'Pending', value: stats.pendingPayments || pending, icon: Clock, gradient: 'var(--gradient-warning)', trend: '', up: false },
-    { label: 'Unread Messages', value: stats.unreadMessages || 0, icon: MessageSquare, gradient: 'var(--gradient-accent)', trend: '', up: true },
+    { label: "Today's Bookings", value: stats.todayBookings || todayBookings.length, icon: Calendar, gradient: 'var(--gradient-primary)', trend: `${stats.revenueTrend >= 0 ? '+' : ''}${stats.revenueTrend || 0}%`, up: (stats.revenueTrend || 0) >= 0 },
+    { label: 'Revenue Today', value: `${currency}${(stats.revenue || 0).toLocaleString()}`, icon: DollarSign, gradient: 'var(--gradient-success)', trend: `${stats.revenueTrend >= 0 ? '+' : ''}${stats.revenueTrend || 0}%`, up: (stats.revenueTrend || 0) >= 0 },
+    { label: 'Repeat Clients', value: `${stats.repeatRate || 0}%`, icon: Repeat, gradient: 'var(--gradient-accent)', trend: '', up: true },
+    { label: 'No-Show Rate', value: `${stats.noShowRate || 0}%`, icon: UserX, gradient: 'var(--gradient-warning)', trend: '', up: false },
   ];
 
   const handleSaveBooking = async (form) => {
-    if (!form.customer || !form.date || !form.time) { toast('Please fill customer, date and time', 'error'); return; }
+    if (!form.customer || !form.date || !form.time) { toast('Please fill client name, date and time', 'error'); return; }
     try {
       await api.post('/api/bookings', {
         customerName: form.customer,
         phone: form.phone,
         serviceId: form.serviceId || undefined,
+        staffMemberId: form.staffMemberId || undefined,
         date: form.date,
         time: form.time,
         amount: form.amount || 0,
@@ -155,7 +170,7 @@ export default function Dashboard() {
       return (
         <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', padding: '10px 14px', borderRadius: 8, fontSize: '0.8rem' }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
-          <div style={{ color: 'var(--color-primary-light)' }}>₹{payload[0].value.toLocaleString()}</div>
+          <div style={{ color: 'var(--color-primary-light)' }}>{currency}{payload[0].value.toLocaleString()}</div>
           {payload[1] && <div style={{ color: 'var(--text-muted)' }}>{payload[1].value} bookings</div>}
         </div>
       );
@@ -169,7 +184,7 @@ export default function Dashboard() {
     <>
       <Topbar
         title={`Good ${new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 17 ? 'Afternoon' : 'Evening'}, ${user?.name?.split(' ')[0] || 'there'} 👋`}
-        subtitle={`${user?.businessName || 'Your Business'} · ${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}`}
+        subtitle={`${user?.businessName || 'Your Business'} · ${new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' })}`}
       />
       <div className="page-content">
         {/* Stats */}
@@ -203,8 +218,8 @@ export default function Dashboard() {
             <button className="btn btn-secondary" onClick={() => navigate('/app/walkins')}>
               <UserPlus size={16} /> Add Walk-in
             </button>
-            <button className="btn btn-ghost" onClick={() => navigate('/app/inbox')}>
-              <MessageSquare size={16} /> View Inbox
+            <button className="btn btn-ghost" onClick={() => navigate('/app/team')}>
+              <UsersRound size={16} /> Manage Team
             </button>
           </div>
         </div>
@@ -219,7 +234,7 @@ export default function Dashboard() {
                 <div>
                   <div className="section-title">Revenue This Week</div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 2 }}>
-                    Total: ₹{revenueData.reduce((a, b) => a + (b.revenue || 0), 0).toLocaleString()}
+                    Total: {currency}{revenueData.reduce((a, b) => a + (b.revenue || 0), 0).toLocaleString()}
                   </div>
                 </div>
               </div>
@@ -233,7 +248,7 @@ export default function Dashboard() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={v => `₹${v/1000}k`} />
+                  <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={v => `${currency}${v >= 1000 ? (v/1000).toFixed(0) + 'k' : v}`} />
                   <Tooltip content={<CustomTooltip />} />
                   <Area type="monotone" dataKey="revenue" stroke="#6366f1" strokeWidth={2} fill="url(#colorRev)" />
                 </AreaChart>
@@ -254,7 +269,7 @@ export default function Dashboard() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Customer</th>
+                      <th>Client</th>
                       <th>Service</th>
                       <th>Time</th>
                       <th>Amount</th>
@@ -285,10 +300,10 @@ export default function Dashboard() {
                           </td>
                           <td>{b.service?.name || '-'}</td>
                           <td><span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Clock size={12} style={{ color: 'var(--text-muted)' }} /> {b.time}</span></td>
-                          <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>₹{b.amount}</td>
+                          <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>{currency}{b.amount || (b.amountCents ? (b.amountCents / 100) : 0)}</td>
                           <td>
                             <span className="badge" style={{ background: sc.bg, color: sc.color, textTransform: 'capitalize' }}>
-                              {b.status}
+                              {b.status === 'no_show' ? 'No Show' : b.status}
                             </span>
                           </td>
                         </tr>
@@ -324,11 +339,36 @@ export default function Dashboard() {
                 Manage Automations
               </button>
             </div>
+
+            {/* Team Overview */}
+            {staffMembers.length > 0 && (
+              <div className="card">
+                <div className="section-header">
+                  <div className="section-title">Team</div>
+                  <span className="badge badge-primary">{staffMembers.length} Members</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {staffMembers.slice(0, 4).map(s => {
+                    const initials = s.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+                    return (
+                      <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0' }}>
+                        <div className="avatar" style={{ width: 28, height: 28, fontSize: '0.7rem', background: s.avatarColor + '25', color: s.avatarColor }}>{initials}</div>
+                        <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: 500 }}>{s.name}</span>
+                        <span className="badge" style={{ fontSize: '0.65rem', textTransform: 'capitalize', background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)' }}>{s.role}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <button className="btn btn-ghost btn-sm w-full" style={{ marginTop: 14, justifyContent: 'center' }} onClick={() => navigate('/app/team')}>
+                  Manage Team
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {showAddBooking && <AddBookingModal onClose={() => setShowAddBooking(false)} onSave={handleSaveBooking} services={services} />}
+      {showAddBooking && <AddBookingModal onClose={() => setShowAddBooking(false)} onSave={handleSaveBooking} services={services} staff={staffMembers} />}
     </>
   );
 }
